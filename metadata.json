@@ -1,0 +1,6 @@
+{
+  "name": "Money Collection & Monthly Billing Management System",
+  "description": "Professional money collection and monthly billing management system for owners and field collection staff to track electricity, water, and miscellaneous bills, cash & online payments, balances, and audit logs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
