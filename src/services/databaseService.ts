@@ -285,7 +285,47 @@ export async function toggleEmployeeStatus(
   });
 }
 
-export async function deleteEmployee(
+export async function clearSectionData(sectionId: string, actor: { id: string; name: string }): Promise<void> {
+  const customers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
+  const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
+  const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+
+  const customerIdsToRemove = customers
+    .filter(c => (c.assigned_section_ids || []).includes(sectionId))
+    .map(c => c.id);
+
+  const remainingCustomers = customers.filter(c => !customerIdsToRemove.includes(c.id));
+  const remainingPeriods = periods.filter(p => !(p.section_id === sectionId && customerIdsToRemove.includes(p.customer_id)));
+  const remainingCollections = collections.filter(c => !(c.section_id === sectionId && customerIdsToRemove.includes(c.customer_id)));
+
+  setStored(STORAGE_KEYS.CUSTOMERS, remainingCustomers);
+  setStored(STORAGE_KEYS.BILLING_PERIODS, remainingPeriods);
+  setStored(STORAGE_KEYS.COLLECTIONS, remainingCollections);
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      for (const cid of customerIdsToRemove) {
+        await supabase.from('billing_periods').delete().eq('customer_id', cid).eq('section_id', sectionId);
+        await supabase.from('collections').delete().eq('customer_id', cid).eq('section_id', sectionId);
+        await supabase.from('customers').delete().eq('id', cid);
+      }
+    } catch (e) {
+      console.warn('Supabase clearSectionData error:', e);
+    }
+  }
+
+  await addAuditLog({
+    actor_user_id: actor.id,
+    actor_name: actor.name,
+    entity_type: 'section',
+    entity_id: sectionId,
+    action_type: 'DELETE',
+    reason: `Cleared all data for section ${sectionId}`,
+  });
+
+  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS]);
+}
   id: string,
   actor: { id: string; name: string }
 ): Promise<void> {
@@ -1318,16 +1358,70 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     }
   });
 
-  return {
-    totalOutstanding: Number(totalOutstanding.toFixed(2)),
-    totalCollectionToday: Number(totalCollectionToday.toFixed(2)),
-    totalCollectionThisMonth: Number(totalCollectionThisMonth.toFixed(2)),
-    totalCashThisMonth: Number(totalCashThisMonth.toFixed(2)),
-    totalOnlineThisMonth: Number(totalOnlineThisMonth.toFixed(2)),
-    totalPendingCustomers: pendingCount,
-    fullyPaidCustomers: fullyPaidCount,
-    partiallyPaidCustomers: partiallyPaidCount,
-    overdueCustomers: overdueCount,
-    totalCustomers: customers.length,
-  };
+export async function clearSectionData(sectionId: string, actor: { id: string; name: string }): Promise<void> {
+  const customers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
+  const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
+  const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+  const toRemove = customers.filter(c => (c.assigned_section_ids || []).includes(sectionId)).map(c => c.id);
+  setStored(STORAGE_KEYS.CUSTOMERS, customers.filter(c => !toRemove.includes(c.id)));
+  setStored(STORAGE_KEYS.BILLING_PERIODS, periods.filter(p => !(p.section_id === sectionId && toRemove.includes(p.customer_id))));
+  setStored(STORAGE_KEYS.COLLECTIONS, collections.filter(c => !(c.section_id === sectionId && toRemove.includes(c.customer_id))));
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      for (const cid of toRemove) {
+        await supabase.from('billing_periods').delete().eq('customer_id', cid).eq('section_id', sectionId);
+        await supabase.from('collections').delete().eq('customer_id', cid).eq('section_id', sectionId);
+        await supabase.from('customers').delete().eq('id', cid);
+      }
+    } catch (e) {
+      console.warn('Supabase clearSectionData error:', e);
+    }
+  }
+  await addAuditLog({ actor_user_id: actor.id, actor_name: actor.name, entity_type: 'section', entity_id: sectionId, action_type: 'DELETE', reason: 'Cleared all data for section ' + sectionId });
+  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS]);
 }
+
+export async function bulkImportSection1(rows: any[], actor: { id: string; name: string }, month: number = 10, year: number = 2026): Promise<{ created: number }> {
+  const sectionId = 'sec-elec-001';
+  const customers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
+  const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
+  let created = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r.name) continue;
+    const prefix = 'A';
+    const existing = customers.filter(c => (c.customer_code || '').startsWith(prefix)).map(c => c.customer_code);
+    const maxNum = existing.reduce((m, code) => {
+      const n = parseInt((code || '').replace(prefix, ''), 10);
+      return !isNaN(n) && n > m ? n : m;
+    }, 0);
+    const code = prefix + (maxNum + 1 + i);
+    const cid = 'cust-' + code;
+    customers.unshift({ id: cid, customer_code: code, full_name: String(r.name).trim(), phone: String(r.phone || '0000000000').trim(), email: '', house_number: '', building_name: '', address: 'Indore', city: 'Indore', notes: 'Imported from Excel', is_active: true, assigned_section_ids: [sectionId], created_by: actor.id, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as any);
+    const thisMonth = Number(r.this_month || 0);
+    const prevBal = Number(r.prev_balance || 0);
+    const pay = Number(r.pay || 0);
+    const curBal = Number(r.current_balance !== undefined ? r.current_balance : Math.max(0, prevBal + thisMonth - pay));
+    const curU = Number(r.current_unit || 0);
+    const prevU = Number(r.prev_unit || 0);
+    const u = Math.max(0, curU - prevU);
+    periods.push({ id: 'bp-' + cid + '-' + sectionId + '-' + month + '-' + year, customer_id: cid, section_id: sectionId, billing_month: month, billing_year: year, opening_balance: prevBal, bill_amount: thisMonth, additional_charges: 0, credits_or_adjustments: 0, total_amount_due: Number((prevBal + thisMonth).toFixed(2)), paid_amount: pay, closing_balance: curBal, due_date: year + '-' + String(month).padStart(2, '0') + '-05', payment_status: computePaymentStatus(Number((prevBal + thisMonth).toFixed(2)), pay, year + '-' + String(month).padStart(2, '0') + '-05'), current_unit: curU, previous_unit: prevU, units_consumed: u, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as any);
+    created++;
+  }
+  setStored(STORAGE_KEYS.CUSTOMERS, customers);
+  setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await supabase.from('customers').upsert(customers);
+      await supabase.from('billing_periods').upsert(periods);
+    } catch (e) {
+      console.warn('Supabase bulkImportSection1 error:', e);
+    }
+  }
+  await addAuditLog({ actor_user_id: actor.id, actor_name: actor.name, entity_type: 'section', entity_id: sectionId, action_type: 'CREATE', reason: 'Imported ' + created + ' records into Section 1 from Excel' });
+  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+  return { created };
+}
+
