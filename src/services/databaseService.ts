@@ -64,6 +64,31 @@ export function notifySync(key?: string) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Supabase Broadcast sync – pushes actual data payloads to all connected devices
+// AppContext will register a sender function here after connecting
+// ─────────────────────────────────────────────────────────────────────────────
+type BroadcastSendFn = (key: string, data: unknown) => Promise<void>;
+let _broadcastSender: BroadcastSendFn | null = null;
+
+export function setBroadcastSender(fn: BroadcastSendFn | null): void {
+  _broadcastSender = fn;
+}
+
+async function broadcastDataSync(changedKeys: string[]): Promise<void> {
+  if (!_broadcastSender) return;
+  for (const key of changedKeys) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const data = JSON.parse(raw);
+      await _broadcastSender(key, data);
+    } catch (e) {
+      console.warn('[Sync] broadcastDataSync error for key', key, e);
+    }
+  }
+}
+
 function setStored<T>(key: string, data: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(data));
@@ -636,6 +661,9 @@ export async function updateBillingPeriodCharges(
     reason: reason || 'Updated monthly bill charges & balances',
   });
 
+  // Broadcast updated billing_periods to all connected devices
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+
   return target;
 }
 
@@ -709,6 +737,9 @@ export async function updateRemainingDueDirectly(
     reason: reason || 'Directly edited remaining due',
   });
 
+  // Broadcast to all connected devices
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+
   return target;
 }
 
@@ -781,6 +812,8 @@ export async function updateLastMonthPaidDirectly(
     new_values: { paid_amount: target.paid_amount, closing_balance: target.closing_balance },
     reason: reason || 'Directly edited last month paid entry',
   });
+
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
 
   return target;
 }
@@ -979,6 +1012,9 @@ export async function addCollection(
     reason: 'Recorded payment collection',
   });
 
+  // Broadcast updated billing_periods + collections to all connected devices
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS]);
+
   return newCollection;
 }
 
@@ -1051,6 +1087,8 @@ export async function updateCollection(
     reason: reason || 'Authorized payment modification',
   });
 
+  await broadcastDataSync([STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+
   return target;
 }
 
@@ -1114,6 +1152,8 @@ export async function reverseCollection(
     new_values: { status: 'Reversed', reversal_id: reversalRecord.id },
     reason,
   });
+
+  await broadcastDataSync([STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS, STORAGE_KEYS.REVERSALS]);
 }
 
 // -------------------------------------------------------------
