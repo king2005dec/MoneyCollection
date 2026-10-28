@@ -461,7 +461,7 @@ export async function createCustomer(
       total_amount_due: 0.00,
       paid_amount: 0.00,
       closing_balance: 0.00,
-      due_date: '2026-10-25',
+      due_date: '2026-10-05',
       payment_status: 'Pending',
       current_unit: 0,
       previous_unit: 0,
@@ -832,7 +832,7 @@ export async function carryForwardMonth(
   targetYear: number,
   prevMonth: number,
   prevYear: number,
-  defaultDueDay: number = 15,
+  defaultDueDay: number = 5,
   actor: { id: string; name: string }
 ): Promise<{ countCreated: number }> {
   const customers = await getCustomers();
@@ -840,6 +840,7 @@ export async function carryForwardMonth(
   let countCreated = 0;
 
   const dueDate = `${targetYear}-${targetMonth.toString().padStart(2, '0')}-${defaultDueDay.toString().padStart(2, '0')}`;
+  const dueDay = defaultDueDay; // billing due date is 5th of month as requested
 
   for (const customer of customers) {
     if (!customer.is_active) continue;
@@ -854,7 +855,7 @@ export async function carryForwardMonth(
       );
 
       if (!exists) {
-        // Find previous period closing balance
+        // Find previous period closing balance - carry forward automatically
         const prevPeriod = periods.find(
           p => p.customer_id === customer.id &&
                p.section_id === sectionId &&
@@ -877,7 +878,7 @@ export async function carryForwardMonth(
           total_amount_due: openingBalance,
           paid_amount: 0.00,
           closing_balance: openingBalance,
-          due_date: dueDate,
+          due_date: `${targetYear}-${targetMonth.toString().padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
           payment_status: openingBalance > 0 ? 'Pending' : 'Paid',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -965,7 +966,7 @@ export async function addCollection(
       total_amount_due: 0,
       paid_amount: 0,
       closing_balance: 0,
-      due_date: '2026-10-25',
+      due_date: '2026-10-05',
       payment_status: 'Pending',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
