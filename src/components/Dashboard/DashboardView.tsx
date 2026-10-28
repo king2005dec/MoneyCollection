@@ -91,6 +91,23 @@ export const DashboardView: React.FC = () => {
     loadData();
   }, [dbVersion]);
 
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key && (e.key.startsWith('col_db_') || e.key.includes('billing') || e.key.includes('collections'))) {
+        loadData();
+      }
+    };
+    const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('money_collection_live_sync') : null;
+    if (bc) {
+      bc.onmessage = () => loadData();
+    }
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      if (bc) bc.close();
+    };
+  }, []);
+
   // Filtered collections for the table
   const filteredCollections = collections.filter(col => {
     if (selectedSectionFilter !== 'all' && col.section_id !== selectedSectionFilter) return false;
