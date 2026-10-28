@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import {
@@ -17,6 +17,7 @@ import {
   getProfiles,
   getSections,
 } from '../../services/databaseService';
+import { getSupabaseClient } from '../../services/supabaseClient';
 import { StatCards } from './StatCards';
 import { SectionOverviewCards } from './SectionOverviewCards';
 import { CollectionCharts } from './CollectionCharts';
@@ -93,7 +94,7 @@ export const DashboardView: React.FC = () => {
 
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key && (e.key.startsWith('col_db_') || e.key.includes('billing') || e.key.includes('collections'))) {
+      if (e.key && (e.key.startsWith('col_db_') || e.key.includes('collections') || e.key.includes('billing') || e.key.includes('audit'))) {
         loadData();
       }
     };
@@ -101,10 +102,38 @@ export const DashboardView: React.FC = () => {
     if (bc) {
       bc.onmessage = () => loadData();
     }
+
+    const supabase = getSupabaseClient();
+    let channel: any = null;
+    if (supabase) {
+      try {
+        channel = supabase
+          .channel('money_collection_dashboard_sync')
+          .on('broadcast', { event: 'data_sync' }, (payload: any) => {
+            const key = payload?.payload?.key;
+            if (!key) {
+              loadData();
+              return;
+            }
+            if (key.includes('collections') || key.includes('billing') || key.includes('customers') || key.includes('audit')) {
+              loadData();
+            }
+          })
+          .subscribe();
+      } catch (e) {
+        console.warn('Dashboard supabase sync error:', e);
+      }
+    }
+
     window.addEventListener('storage', handleStorage);
     return () => {
       window.removeEventListener('storage', handleStorage);
       if (bc) bc.close();
+      if (supabase && channel) {
+        try {
+          supabase.removeChannel(channel);
+        } catch (e) {}
+      }
     };
   }, []);
 
