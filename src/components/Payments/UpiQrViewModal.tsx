@@ -93,7 +93,7 @@ export const UpiQrViewModal: React.FC<UpiQrViewModalProps> = ({
             <div className="w-56 h-auto bg-white p-2 rounded-xl shadow-xs border border-slate-200 overflow-hidden">
               <img
                 src="/assets/aistudio/WhatsApp_Image_2026-10-24_at_1.22.05_AM_eb959bc9.jpeg"
-                alt="RAJ Haldar UPI QR Code"
+                alt="Raj UPI QR Code"
                 className="w-full h-auto object-contain rounded-lg"
               />
             </div>

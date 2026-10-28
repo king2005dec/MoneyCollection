@@ -5,8 +5,12 @@ const LOCAL_STORAGE_KEY_URL = 'app_supabase_url';
 const LOCAL_STORAGE_KEY_KEY = 'app_supabase_anon_key';
 
 export function getSupabaseCredentials(): { url: string; anonKey: string } {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL || 'https://wwremqgjkwhprambdlwc.supabase.co';
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_UqPFp0hjCCKklqPZx8XzHA_5w93MP9r';
+  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 
+                 (import.meta as any).env?.NEXT_PUBLIC_SUPABASE_URL || 
+                 'https://wwremqgjkwhprambdlwc.supabase.co';
+  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 
+                 (import.meta as any).env?.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 
+                 'sb_publishable_UqPFp0hjCCKklqPZx8XzHA_5w93MP9r';
 
   const customUrl = typeof window !== 'undefined' ? localStorage.getItem(LOCAL_STORAGE_KEY_URL) : null;
   const customKey = typeof window !== 'undefined' ? localStorage.getItem(LOCAL_STORAGE_KEY_KEY) : null;

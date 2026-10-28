@@ -21,6 +21,7 @@ import {
 } from '../../services/databaseService';
 import { formatCurrency } from '../../utils/formatters';
 import { UpiQrViewModal } from '../Payments/UpiQrViewModal';
+import { InvoiceModal } from '../Billing/InvoiceModal';
 import {
   Search,
   Filter,
@@ -81,6 +82,16 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const [isNextMonthModalOpen, setIsNextMonthModalOpen] = useState<boolean>(false);
   const [generatingNextMonth, setGeneratingNextMonth] = useState<boolean>(false);
 
+  // Invoice Download & Print Modal State
+  const [invoiceModalData, setInvoiceModalData] = useState<{
+    customer: Customer;
+    period: BillingPeriod;
+  } | null>(null);
+
+  const openInvoiceModal = (customer: Customer, period: BillingPeriod) => {
+    setInvoiceModalData({ customer, period });
+  };
+
   useEffect(() => {
     if (initialPendingOnly !== undefined) {
       setPendingOnly(initialPendingOnly);
@@ -105,7 +116,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const [editingCell, setEditingCell] = useState<{
     customerId: string;
     sectionId: string;
-    field: 'pay' | 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit';
+    field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit';
     periodId?: string;
   } | null>(null);
 
@@ -299,13 +310,13 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const handleCellClick = (
     customerId: string,
     sectionId: string,
-    field: 'pay' | 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit',
+    field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit',
     currentVal: string | number,
     periodId?: string
   ) => {
-    // If staff (not owner), they can ONLY update balance & payments
-    if (!isOwner && field !== 'pay' && field !== 'closing_balance') {
-      showToast('Staff can only update balance and payments. Owner permission required for resident details, bills and meter readings.', 'info');
+    // If staff (not owner), they record payment via Action > Update modal
+    if (!isOwner && field !== 'closing_balance') {
+      showToast('Staff can record payments using Action > Update. Owner permission required for resident details, bills and meter readings.', 'info');
       return;
     }
 
@@ -322,7 +333,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const handleCellSave = async (
     customerId: string,
     sectionId: string,
-    field: 'pay' | 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit'
+    field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit'
   ) => {
     const actor = {
       id: currentUser?.id || 'usr-staff-001',
@@ -344,37 +355,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         }
         await updateCustomer(customerId, { full_name: editValue.trim() }, actor);
         showToast(`Updated resident name to "${editValue.trim()}"`);
-      } else if (field === 'pay') {
-        // Staff or Owner recording collected payment
-        const numVal = parseFloat(editValue);
-        if (isNaN(numVal) || numVal < 0) {
-          showToast('Please enter a valid positive number for payment.', 'error');
-          setEditingCell(null);
-          return;
-        }
-        const targetPeriod = billingPeriods.find(
-          p => p.customer_id === customerId &&
-               p.section_id === sectionId &&
-               p.billing_month === selectedMonth &&
-               p.billing_year === selectedYear
-        );
-        const periodId = targetPeriod?.id || `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
-        await addCollection(
-          {
-            customer_id: customerId,
-            section_id: sectionId,
-            billing_period_id: periodId,
-            amount: numVal,
-            payment_method: 'Cash',
-            collection_date: new Date().toISOString().slice(0, 10),
-            collection_time: new Date().toTimeString().slice(0, 8),
-            notes: 'Payment recorded via Ledger view',
-            created_by: actor.id,
-            created_by_name: actor.name,
-          },
-          actor
-        );
-        showToast(`Payment of ${formatCurrency(numVal)} recorded successfully!`);
       } else if (field === 'closing_balance') {
         // Staff or Owner updating remaining balance directly
         const numVal = parseFloat(editValue);
@@ -559,46 +539,35 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       };
 
       const payNum = parseFloat(modalPayAmount);
-      const balNum = parseFloat(modalBalanceAmount);
 
-      // If pay entered and changed
-      if (!isNaN(payNum) && payNum > 0 && payNum !== balanceModalCustomer.pay) {
-        const periodId = `bp-${balanceModalCustomer.customer.id}-${balanceModalCustomer.sectionId}-${selectedMonth}-${selectedYear}`;
-        await addCollection(
-          {
-            customer_id: balanceModalCustomer.customer.id,
-            section_id: balanceModalCustomer.sectionId,
-            billing_period_id: periodId,
-            amount: payNum,
-            payment_method: 'Cash',
-            collection_date: new Date().toISOString().slice(0, 10),
-            collection_time: new Date().toTimeString().slice(0, 8),
-            notes: modalReason.trim() || 'Balance updated from Ledger view',
-            created_by: actor.id,
-            created_by_name: actor.name,
-          },
-          actor
-        );
+      if (isNaN(payNum) || payNum <= 0) {
+        showToast('Please enter a valid payment amount to collect.', 'error');
+        setSavingModal(false);
+        return;
       }
 
-      // If remaining balance explicitly changed
-      if (!isNaN(balNum) && balNum >= 0 && balNum !== balanceModalCustomer.currentBalance) {
-        await updateRemainingDueDirectly(
-          balanceModalCustomer.customer.id,
-          balanceModalCustomer.sectionId,
-          selectedMonth,
-          selectedYear,
-          balNum,
-          modalReason.trim() || 'Direct balance adjustment from Ledger view',
-          actor
-        );
-      }
+      const periodId = balanceModalCustomer.period?.id || `bp-${balanceModalCustomer.customer.id}-${balanceModalCustomer.sectionId}-${selectedMonth}-${selectedYear}`;
+      await addCollection(
+        {
+          customer_id: balanceModalCustomer.customer.id,
+          section_id: balanceModalCustomer.sectionId,
+          billing_period_id: periodId,
+          amount: payNum,
+          payment_method: 'Cash',
+          collection_date: new Date().toISOString().slice(0, 10),
+          collection_time: new Date().toTimeString().slice(0, 8),
+          notes: modalReason.trim() || 'Payment collected via Action > Update',
+          created_by: actor.id,
+          created_by_name: actor.name,
+        },
+        actor
+      );
 
-      showToast(`Balance updated successfully for ${balanceModalCustomer.customer.full_name}!`);
+      showToast(`Payment of ${formatCurrency(payNum)} recorded successfully for ${balanceModalCustomer.customer.full_name}! Remaining balance updated.`);
       setBalanceModalCustomer(null);
       triggerDbRefresh();
     } catch (err: any) {
-      showToast(err?.message || 'Failed to update balance', 'error');
+      showToast(err?.message || 'Failed to record payment', 'error');
     } finally {
       setSavingModal(false);
     }
@@ -622,7 +591,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         payment_method: 'UPI',
         collection_date: new Date().toISOString().slice(0, 10),
         collection_time: new Date().toTimeString().slice(0, 8),
-        notes: `UPI QR payment received (RAJ Haldar)${utr ? ` • UTR: ${utr}` : ''}`,
+        notes: `UPI QR payment received (Raj)${utr ? ` • UTR: ${utr}` : ''}`,
         created_by: actor.id,
         created_by_name: actor.name,
       },
@@ -1160,9 +1129,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <th className="py-2 px-3 min-w-[140px] border-r border-slate-300 bg-slate-100 sticky top-[37px]">
                 Name {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
               </th>
-              <th className="py-2 px-3 text-right bg-[#e6f4ea] text-emerald-900 border-r border-slate-300 sticky top-[37px]">
-                Pay (Paid)
-              </th>
               <th className="py-2 px-3 text-right bg-[#fce8e6] text-rose-900 border-r border-slate-300 sticky top-[37px]">
                 This Month {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
               </th>
@@ -1172,10 +1138,13 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <th className="py-2 px-3 text-right border-r border-slate-300 font-extrabold bg-slate-100 sticky top-[37px]">
                 Total Balance
               </th>
+              <th className="py-2 px-3 text-right bg-[#e6f4ea] text-emerald-900 border-r border-slate-300 sticky top-[37px]">
+                Pay (Paid)
+              </th>
               <th className="py-2 px-3 text-right bg-rose-50 text-rose-950 font-black border-r border-slate-300 sticky top-[37px]">
                 Current Balance
               </th>
-              <th className="py-2 px-2.5 text-center border-r-2 border-emerald-400 min-w-[130px] bg-slate-100 sticky top-[37px]">
+              <th className="py-2 px-2.5 text-center border-r-2 border-emerald-400 min-w-[160px] bg-slate-100 sticky top-[37px]">
                 Actions
               </th>
 
@@ -1212,13 +1181,15 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       }`}
                     >
                     {/* 1. ID: Colored badge (Green = Settled, Yellow = Pending) */}
+                    {/* 1. ID: Colored badge (Green = Fully Paid, Red = Remaining Due / Adda) */}
                     <td className="py-2 px-2 text-center border-r border-slate-200">
                       <span
-                        className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-black tracking-tight ${
-                          row.isPaid
-                            ? 'bg-[#b7e1cd] text-emerald-950'
-                            : 'bg-[#fce8b2] text-amber-950'
+                        className={`inline-block px-2 py-0.5 rounded text-[11px] font-black tracking-tight shadow-2xs ${
+                          row.currentBalance <= 0
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-rose-600 text-white'
                         }`}
+                        title={row.currentBalance <= 0 ? `${row.name} - Fully Paid (Settled)` : `${row.name} - Pending Balance: ₹${row.currentBalance}`}
                       >
                         {row.customerCode}
                       </span>
@@ -1275,45 +1246,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       )}
                     </td>
 
-                    {/* 3. Pay (Collected Amount) - Editable by Staff & Owner */}
-                    <td
-                      onClick={() => {
-                        handleCellClick(row.customer.id, row.targetSectionId, 'pay', row.pay, row.period?.id);
-                      }}
-                      className="py-2 px-3 text-right font-black text-emerald-800 bg-[#e6f4ea]/70 border-r border-slate-200 cursor-pointer hover:bg-emerald-100 group relative"
-                      title="Click to record/update collected payment"
-                    >
-                      {editingCell?.customerId === row.customer.id && editingCell?.field === 'pay' ? (
-                        <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
-                          <input
-                            type="number"
-                            step="1"
-                            autoFocus
-                            value={editValue}
-                            onChange={e => setEditValue(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') handleCellSave(row.customer.id, row.targetSectionId, 'pay');
-                              if (e.key === 'Escape') setEditingCell(null);
-                            }}
-                            className="w-20 px-1.5 py-0.5 text-xs font-bold border-2 border-emerald-600 rounded bg-white text-right"
-                          />
-                          <button
-                            disabled={savingCell}
-                            onClick={() => handleCellSave(row.customer.id, row.targetSectionId, 'pay')}
-                            className="p-1 bg-emerald-600 text-white rounded text-[10px]"
-                          >
-                            ✓
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end gap-1">
-                          <span>{row.pay}</span>
-                          <Pencil className="w-2.5 h-2.5 text-emerald-600 opacity-0 group-hover:opacity-100" />
-                        </div>
-                      )}
-                    </td>
-
-                    {/* 4. This Month Bill - Editable by Owner, Read-Only for Staff */}
+                    {/* 3. This Month Bill - Editable by Owner, Read-Only for Staff */}
                     <td
                       onClick={() => {
                         handleCellClick(row.customer.id, row.targetSectionId, 'this_month', row.thisMonth, row.period?.id);
@@ -1355,7 +1288,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       )}
                     </td>
 
-                    {/* 5. Previous Balance - Editable by Owner, Read-Only for Staff */}
+                    {/* 4. Previous Balance - Editable by Owner, Read-Only for Staff */}
                     <td
                       onClick={() => {
                         handleCellClick(row.customer.id, row.targetSectionId, 'prev_balance', row.prevBalance, row.period?.id);
@@ -1397,9 +1330,19 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       )}
                     </td>
 
-                    {/* 6. Total Balance */}
+                    {/* 5. Total Balance */}
                     <td className="py-2 px-3 text-right font-bold text-slate-900 border-r border-slate-200">
                       {row.totalBalance > 0 ? row.totalBalance : 0}
+                    </td>
+
+                    {/* 6. Pay (Paid Amount) - Read Only in Table, Updated via Action > Update */}
+                    <td
+                      className="py-2 px-3 text-right font-black text-emerald-800 bg-[#e6f4ea]/70 border-r border-slate-200"
+                      title="Payment recorded via Action > Update"
+                    >
+                      <div className="flex items-center justify-end">
+                        <span>{row.pay > 0 ? row.pay : 0}</span>
+                      </div>
                     </td>
 
                     {/* 7. Current Balance (Pending Due) - Editable by Staff & Owner */}
@@ -1442,7 +1385,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       )}
                     </td>
 
-                    {/* 8. Actions Column: Update, UPI QR, and Delete (Owner) */}
+                    {/* 8. Actions Column: Update, UPI QR, Invoice, and Delete (Owner) */}
                     <td className="py-2 px-2 text-center border-r-2 border-emerald-400">
                       <div className="flex items-center justify-center gap-1">
                         {/* Fast Balance Update Modal */}
@@ -1450,12 +1393,12 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                           type="button"
                           onClick={() => openBalanceModal(row)}
                           title="Update Balance"
-                          className="px-2 py-1 bg-blue-50 hover:bg-blue-600 hover:text-white text-blue-700 rounded text-[10px] font-bold transition shadow-2xs"
+                          className="px-2 py-1 bg-blue-50 hover:bg-blue-600 hover:text-white text-blue-700 rounded text-[10px] font-bold transition shadow-2xs cursor-pointer"
                         >
                           Update
                         </button>
 
-                        {/* UPI QR Code Trigger (Directly opens Google Pay QR) */}
+                        {/* UPI QR Code Trigger */}
                         <button
                           type="button"
                           onClick={() => {
@@ -1468,11 +1411,42 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                               initialAmount: row.currentBalance > 0 ? row.currentBalance : undefined,
                             });
                           }}
-                          title="Open RAJ Haldar UPI QR Code"
-                          className="px-2 py-1 bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 rounded text-[10px] font-bold transition shadow-2xs flex items-center gap-0.5"
+                          title="Open Raj UPI QR Code"
+                          className="px-2 py-1 bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 rounded text-[10px] font-bold transition shadow-2xs flex items-center gap-0.5 cursor-pointer"
                         >
                           <QrCode className="w-3 h-3" />
                           <span>UPI</span>
+                        </button>
+
+                        {/* Download / Print Invoice Button */}
+                        <button
+                          type="button"
+                          onClick={() => openInvoiceModal(row.customer, row.period || {
+                            id: `bp-${row.customer.id}-${row.targetSectionId}-${selectedMonth}-${selectedYear}`,
+                            customer_id: row.customer.id,
+                            section_id: row.targetSectionId,
+                            billing_month: selectedMonth,
+                            billing_year: selectedYear,
+                            opening_balance: row.prevBalance,
+                            bill_amount: row.thisMonth,
+                            additional_charges: 0,
+                            credits_or_adjustments: 0,
+                            total_amount_due: row.totalBalance,
+                            paid_amount: row.pay,
+                            closing_balance: row.currentBalance,
+                            due_date: '2026-10-25',
+                            payment_status: row.paymentStatus,
+                            current_unit: row.currentUnit,
+                            previous_unit: row.prevUnit,
+                            units_consumed: row.unitsConsumed,
+                            created_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString(),
+                          })}
+                          title="Download or Print Invoice"
+                          className="px-2 py-1 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded text-[10px] font-bold transition shadow-2xs flex items-center gap-0.5 cursor-pointer"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>Invoice</span>
                         </button>
 
                         {/* Owner Delete Row */}
@@ -1491,8 +1465,16 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
                     {/* Meter Columns */}
                     {/* 9. Meter ID */}
-                    <td className="py-2 px-2 text-center border-r border-slate-200 bg-slate-50 font-mono text-[10px] text-slate-500">
-                      {row.customerCode}
+                    <td className="py-2 px-2 text-center border-r border-slate-200 bg-slate-50 font-mono text-[10px]">
+                      <span
+                        className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-black ${
+                          row.currentBalance <= 0
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-rose-600 text-white'
+                        }`}
+                      >
+                        {row.customerCode}
+                      </span>
                     </td>
 
                     {/* 10. Meter Name */}
@@ -1618,15 +1600,16 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                             <table className="w-full text-xs text-left border-collapse border border-slate-200">
                               <thead>
                                 <tr className="bg-slate-100 text-slate-800 text-[11px] font-bold uppercase">
-                                  <th className="p-2 border border-slate-200">date</th>
-                                  <th className="p-2 border border-slate-200 text-right">current</th>
-                                  <th className="p-2 border border-slate-200 text-right">prev</th>
-                                  <th className="p-2 border border-slate-200 text-right">unit</th>
-                                  <th className="p-2 border border-slate-200 text-right">pay</th>
-                                  <th className="p-2 border border-slate-200 text-right">Bill</th>
-                                  <th className="p-2 border border-slate-200 text-right">prebalance bill</th>
-                                  <th className="p-2 border border-slate-200 text-right">Total bill</th>
-                                  <th className="p-2 border border-slate-200 text-right">cureent balanvce</th>
+                                  <th className="p-2 border border-slate-200">DATE</th>
+                                  <th className="p-2 border border-slate-200 text-right">CURRENT</th>
+                                  <th className="p-2 border border-slate-200 text-right">PREV</th>
+                                  <th className="p-2 border border-slate-200 text-right">UNIT</th>
+                                  <th className="p-2 border border-slate-200 text-right">BILL</th>
+                                  <th className="p-2 border border-slate-200 text-right">PREBALANCE BILL</th>
+                                  <th className="p-2 border border-slate-200 text-right">TOTAL BILL</th>
+                                  <th className="p-2 border border-slate-200 text-right bg-emerald-50 text-emerald-900">PAY</th>
+                                  <th className="p-2 border border-slate-200 text-right">CURRENT BILL</th>
+                                  <th className="p-2 border border-slate-200 text-center w-24">INVOICE</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -1645,11 +1628,42 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                         <td className="p-2 border border-slate-200 text-right font-bold text-blue-700">{row.currentUnit}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-slate-600">{row.prevUnit}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-indigo-700">{row.unitsConsumed}</td>
-                                        <td className="p-2 border border-slate-200 text-right font-bold text-emerald-700">{formatCurrency(row.pay)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-rose-700">{formatCurrency(row.thisMonth)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-amber-700">{formatCurrency(row.prevBalance)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-slate-900">{formatCurrency(row.totalBalance)}</td>
+                                        <td className="p-2 border border-slate-200 text-right font-bold text-emerald-700 bg-emerald-50/50">{formatCurrency(row.pay)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-black text-rose-800">{formatCurrency(row.currentBalance)}</td>
+                                        <td className="p-2 border border-slate-200 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => openInvoiceModal(row.customer, row.period || {
+                                              id: `bp-${row.customer.id}-${row.targetSectionId}-${selectedMonth}-${selectedYear}`,
+                                              customer_id: row.customer.id,
+                                              section_id: row.targetSectionId,
+                                              billing_month: selectedMonth,
+                                              billing_year: selectedYear,
+                                              opening_balance: row.prevBalance,
+                                              bill_amount: row.thisMonth,
+                                              additional_charges: 0,
+                                              credits_or_adjustments: 0,
+                                              total_amount_due: row.totalBalance,
+                                              paid_amount: row.pay,
+                                              closing_balance: row.currentBalance,
+                                              due_date: '2026-10-25',
+                                              payment_status: row.paymentStatus,
+                                              current_unit: row.currentUnit,
+                                              previous_unit: row.prevUnit,
+                                              units_consumed: row.unitsConsumed,
+                                              created_at: new Date().toISOString(),
+                                              updated_at: new Date().toISOString(),
+                                            })}
+                                            className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 hover:bg-blue-600 hover:text-white text-blue-700 rounded text-[10px] font-bold transition shadow-2xs cursor-pointer"
+                                            title="Download or Print Invoice"
+                                          >
+                                            <Download className="w-3 h-3" />
+                                            <span>Invoice</span>
+                                          </button>
+                                        </td>
                                       </tr>
                                     );
                                   }
@@ -1665,11 +1679,22 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                         <td className="p-2 border border-slate-200 text-right font-bold text-blue-700">{hp.current_unit ?? 0}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-slate-600">{hp.previous_unit ?? 0}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-indigo-700">{hpUnits}</td>
-                                        <td className="p-2 border border-slate-200 text-right font-bold text-emerald-700">{formatCurrency(hp.paid_amount)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-rose-700">{formatCurrency(hpThisMonth)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-amber-700">{formatCurrency(hp.opening_balance)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-slate-900">{formatCurrency(hp.total_amount_due)}</td>
+                                        <td className="p-2 border border-slate-200 text-right font-bold text-emerald-700 bg-emerald-50/50">{formatCurrency(hp.paid_amount)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-black text-rose-800">{formatCurrency(Math.max(0, hp.closing_balance))}</td>
+                                        <td className="p-2 border border-slate-200 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => openInvoiceModal(row.customer, hp)}
+                                            className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 hover:bg-blue-600 hover:text-white text-blue-700 rounded text-[10px] font-bold transition shadow-2xs cursor-pointer"
+                                            title="Download or Print Invoice"
+                                          >
+                                            <Download className="w-3 h-3" />
+                                            <span>Invoice</span>
+                                          </button>
+                                        </td>
                                       </tr>
                                     );
                                   });
@@ -1693,9 +1718,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <td colSpan={2} className="py-2.5 px-3 text-right uppercase tracking-wider text-xs border-r border-slate-300">
                 Grand Total ({filteredRows.length} rows):
               </td>
-              <td className="py-2.5 px-3 text-right text-emerald-900 bg-emerald-100 border-r border-slate-300 text-xs">
-                {formatCurrency(totalPay)}
-              </td>
               <td className="py-2.5 px-3 text-right text-rose-900 bg-rose-100 border-r border-slate-300 text-xs">
                 {formatCurrency(totalThisMonth)}
               </td>
@@ -1705,13 +1727,16 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <td className="py-2.5 px-3 text-right border-r border-slate-300 text-xs">
                 {formatCurrency(totalGrandBalance)}
               </td>
+              <td className="py-2.5 px-3 text-right text-emerald-900 bg-emerald-100 border-r border-slate-300 text-xs">
+                {formatCurrency(totalPay)}
+              </td>
               <td className="py-2.5 px-3 text-right text-rose-700 bg-rose-100 text-xs font-black border-r border-slate-300">
                 {formatCurrency(totalCurrentBalance)}
               </td>
               <td colSpan={7} className="py-2.5 px-3 text-slate-500 text-xs font-semibold">
                 {isOwner
                   ? 'Owner mode: Click any cell to edit or click "+ Add Row" to add new residents.'
-                  : 'Staff mode: You can update balance and record payments. Contact owner for meter/bill changes.'}
+                  : 'Staff mode: You can update balance and record payments via Action > Update. Contact owner for meter/bill changes.'}
               </td>
             </tr>
           </tfoot>
@@ -1777,7 +1802,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                 className="w-full py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-xs transition"
               >
                 <QrCode className="w-4 h-4" />
-                <span>Show RAJ Haldar UPI QR Code (Google Pay)</span>
+                <span>Show Raj UPI QR Code (Google Pay)</span>
               </button>
 
               {/* 1. Paid Amount (Pay) */}
@@ -1802,25 +1827,25 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                 </span>
               </div>
 
-              {/* 2. Direct Balance Adjust */}
-              <div>
-                <label className="block font-bold text-rose-800 mb-1">
-                  2. Or Set Remaining Balance Directly (₹)
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400">₹</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={modalBalanceAmount}
-                    onChange={e => setModalBalanceAmount(e.target.value)}
-                    className="w-full pl-7 pr-3 py-2 font-bold text-rose-700 rounded-lg border border-slate-300 focus:outline-rose-600"
-                  />
+              {/* 2. Remaining Balance Info (Read-Only - View Only) */}
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-black uppercase text-rose-900 block">
+                      Remaining Balance Directly (₹)
+                    </span>
+                    <span className="text-[10px] text-slate-500">
+                      Current balance due (View only)
+                    </span>
+                  </div>
+                  <span className="text-lg font-black text-rose-700">
+                    {formatCurrency(balanceModalCustomer.currentBalance)}
+                  </span>
                 </div>
-                <span className="text-[10px] text-slate-500 mt-0.5 block">
-                  Synchronizes customer balance immediately
-                </span>
+                <div className="mt-2 pt-2 border-t border-rose-100 flex items-center justify-between text-xs text-slate-600">
+                  <span>Total Bill: <strong>{formatCurrency(balanceModalCustomer.totalBalance)}</strong></span>
+                  <span>Paid So Far: <strong className="text-emerald-700">{formatCurrency(balanceModalCustomer.pay)}</strong></span>
+                </div>
               </div>
 
               {/* 3. Reason */}
@@ -2106,6 +2131,24 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* 7. Invoice Download & Print Modal */}
+      <InvoiceModal
+        isOpen={invoiceModalData !== null}
+        onClose={() => setInvoiceModalData(null)}
+        customer={invoiceModalData?.customer || null}
+        period={invoiceModalData?.period || null}
+        sectionName={
+          sections.find(s => s.id === (invoiceModalData?.period?.section_id || activeTab))?.name ||
+          (activeTab === 'sec-elec-001'
+            ? 'Section 1 - Electricity'
+            : activeTab === 'sec-water-002'
+            ? 'Section 2 - Water'
+            : activeTab === 'sec-other-003'
+            ? 'Section 3 - Maintenance & Other'
+            : 'Section 1 - Electricity')
+        }
+      />
     </div>
   );
 };

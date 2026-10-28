@@ -940,7 +940,7 @@ export const AddPaymentModal: React.FC = () => {
                   <div className="w-48 h-auto bg-white p-2 rounded-xl shadow-xs border border-slate-200 shrink-0">
                     <img
                       src="/assets/aistudio/WhatsApp_Image_2026-10-24_at_1.22.05_AM_eb959bc9.jpeg"
-                      alt="RAJ Haldar UPI QR Code"
+                      alt="Raj UPI QR Code"
                       className="w-full h-auto object-contain rounded-lg"
                     />
                   </div>
@@ -948,7 +948,7 @@ export const AddPaymentModal: React.FC = () => {
                   <div className="flex-1 space-y-2 text-xs w-full">
                     <div className="p-2.5 bg-white rounded-lg border border-slate-200">
                       <span className="text-[10px] text-slate-400 font-bold uppercase block">Beneficiary Name</span>
-                      <span className="font-extrabold text-slate-900 text-sm">RAJ Haldar</span>
+                      <span className="font-extrabold text-slate-900 text-sm">Raj</span>
                     </div>
 
                     <div className="p-2.5 bg-white rounded-lg border border-slate-200 flex items-center justify-between">

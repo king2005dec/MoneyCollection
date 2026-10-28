@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { CollectionSection, Customer, Collection } from '../types';
-import { getSections } from '../services/databaseService';
+import { getSections, initLocalDatabase } from '../services/databaseService';
+import { getSupabaseClient } from '../services/supabaseClient';
 
 export type NavPage =
   | 'dashboard'
@@ -113,12 +114,66 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   useEffect(() => {
+    initLocalDatabase();
     refreshSections();
   }, []);
 
   const triggerDbRefresh = () => {
     setDbVersion(v => v + 1);
   };
+
+  // Supabase Realtime live sync across devices / users
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      const channel = supabase
+        .channel('app_live_sync_all')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'billing_periods' }, () => {
+          triggerDbRefresh();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'collections' }, () => {
+          triggerDbRefresh();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => {
+          triggerDbRefresh();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+          triggerDbRefresh();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch (err) {
+      console.warn('Realtime channel subscribe error:', err);
+    }
+  }, []);
+
+  // Multi-tab sync across windows/tabs
+  useEffect(() => {
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      bc = new BroadcastChannel('money_collection_live_sync');
+      bc.onmessage = () => {
+        triggerDbRefresh();
+      };
+    }
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith('col_db_')) {
+        triggerDbRefresh();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      if (bc) bc.close();
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
 
   const openCustomerProfile = (customerId: string, fromSection?: string) => {
     setSelectedCustomerId(customerId);

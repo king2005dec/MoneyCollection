@@ -17,7 +17,7 @@ import {
 export const INITIAL_PROFILES: Profile[] = [
   {
     id: 'usr-owner-001',
-    full_name: 'Rajesh Haldar',
+    full_name: 'Raj',
     email: 'owner@collectionpro.in',
     phone: '+91 98260 11001',
     role: 'owner',
@@ -170,7 +170,7 @@ export const INITIAL_CASH_RECONCILIATION: CashReconciliation[] = [
     actual_closing_cash: 500.00,
     difference: 0.00,
     verified_by: 'usr-owner-001',
-    verified_by_name: 'Rajesh Sharma',
+    verified_by_name: 'Raj',
     notes: 'Fully reconciled and cash deposited into locker.',
     created_at: '2026-10-21T18:00:00+05:30',
     updated_at: '2026-10-21T18:10:00+05:30',
@@ -188,7 +188,7 @@ export const INITIAL_CASH_RECONCILIATION: CashReconciliation[] = [
     actual_closing_cash: 200.00,
     difference: 0.00,
     verified_by: 'usr-owner-001',
-    verified_by_name: 'Rajesh Sharma',
+    verified_by_name: 'Raj',
     notes: 'Daily field cash matched with receipt book.',
     created_at: '2026-10-21T18:30:00+05:30',
     updated_at: '2026-10-21T18:40:00+05:30',

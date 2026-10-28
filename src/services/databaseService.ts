@@ -50,9 +50,24 @@ function getStored<T>(key: string, defaultData: T): T {
   }
 }
 
+const syncBroadcast = typeof window !== 'undefined' && 'BroadcastChannel' in window 
+  ? new BroadcastChannel('money_collection_live_sync') 
+  : null;
+
+export function notifySync(key?: string) {
+  if (syncBroadcast) {
+    try {
+      syncBroadcast.postMessage({ key, timestamp: Date.now() });
+    } catch (e) {
+      // ignore
+    }
+  }
+}
+
 function setStored<T>(key: string, data: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(data));
+    notifySync(key);
   } catch (err) {
     console.error(`Error writing ${key} to storage:`, err);
   }
@@ -69,6 +84,33 @@ export function initLocalDatabase(): void {
   getStored(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
   getStored(STORAGE_KEYS.CASH_RECONCILIATION, INITIAL_CASH_RECONCILIATION);
   getStored(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+
+  seedSupabaseIfEmpty();
+}
+
+export async function seedSupabaseIfEmpty(): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+  try {
+    const { count, error } = await supabase.from('customers').select('*', { count: 'exact', head: true });
+    if (!error && (count === 0 || count === null)) {
+      const customers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
+      const sections = getStored<CollectionSection[]>(STORAGE_KEYS.SECTIONS, INITIAL_SECTIONS);
+      const profiles = getStored<Profile[]>(STORAGE_KEYS.PROFILES, INITIAL_PROFILES);
+      const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
+      const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+
+      await supabase.from('profiles').upsert(profiles);
+      await supabase.from('collection_sections').upsert(sections);
+      await supabase.from('customers').upsert(customers);
+      await supabase.from('billing_periods').upsert(periods);
+      await supabase.from('collections').upsert(collections);
+      return true;
+    }
+  } catch (err) {
+    console.warn('Seed Supabase check:', err);
+  }
+  return false;
 }
 
 // -------------------------------------------------------------
@@ -87,7 +129,7 @@ export async function getProfiles(): Promise<Profile[]> {
   INITIAL_PROFILES.forEach(initP => {
     const existingIndex = loaded.findIndex(p => p.id === initP.id || (p.username && initP.username && p.username.toLowerCase() === initP.username.toLowerCase()));
     if (existingIndex >= 0) {
-      if (loaded[existingIndex].password !== initP.password || loaded[existingIndex].username !== initP.username) {
+      if (loaded[existingIndex].password !== initP.password || loaded[existingIndex].username !== initP.username || loaded[existingIndex].full_name !== initP.full_name) {
         loaded[existingIndex] = { ...loaded[existingIndex], username: initP.username, password: initP.password, role: initP.role, full_name: initP.full_name };
         updated = true;
       }
@@ -307,8 +349,15 @@ export async function updateSectionName(
 export async function getCustomers(): Promise<Customer[]> {
   const supabase = getSupabaseClient();
   if (supabase) {
-    const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
-    if (!error && data && data.length > 0) return data;
+    try {
+      const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
+      if (!error && data && data.length > 0) {
+        setStored(STORAGE_KEYS.CUSTOMERS, data);
+        return data;
+      }
+    } catch (e) {
+      console.warn('Supabase getCustomers error:', e);
+    }
   }
   const loaded = getStored(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
   // Ensure every customer has proper Section 1=A, Section 2=B, Section 3=C ID
@@ -489,8 +538,15 @@ export async function deleteCustomer(
 export async function getBillingPeriods(): Promise<BillingPeriod[]> {
   const supabase = getSupabaseClient();
   if (supabase) {
-    const { data, error } = await supabase.from('billing_periods').select('*').order('billing_year', { ascending: false }).order('billing_month', { ascending: false });
-    if (!error && data && data.length > 0) return data;
+    try {
+      const { data, error } = await supabase.from('billing_periods').select('*').order('billing_year', { ascending: false }).order('billing_month', { ascending: false });
+      if (!error && data && data.length > 0) {
+        setStored(STORAGE_KEYS.BILLING_PERIODS, data);
+        return data;
+      }
+    } catch (e) {
+      console.warn('Supabase getBillingPeriods error:', e);
+    }
   }
   return getStored(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
 }
@@ -819,8 +875,15 @@ export async function carryForwardMonth(
 export async function getCollections(): Promise<Collection[]> {
   const supabase = getSupabaseClient();
   if (supabase) {
-    const { data, error } = await supabase.from('collections').select('*').order('created_at', { ascending: false });
-    if (!error && data && data.length > 0) return data;
+    try {
+      const { data, error } = await supabase.from('collections').select('*').order('created_at', { ascending: false });
+      if (!error && data && data.length > 0) {
+        setStored(STORAGE_KEYS.COLLECTIONS, data);
+        return data;
+      }
+    } catch (e) {
+      console.warn('Supabase getCollections error:', e);
+    }
   }
   return getStored(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
 }
@@ -891,7 +954,14 @@ export async function addCollection(
 
   const supabase = getSupabaseClient();
   if (supabase) {
-    await supabase.from('collections').insert(newCollection);
+    try {
+      await supabase.from('collections').insert(newCollection);
+      if (period) {
+        await supabase.from('billing_periods').upsert(period);
+      }
+    } catch (e) {
+      console.warn('Supabase sync error in addCollection:', e);
+    }
   }
 
   await addAuditLog({
@@ -957,6 +1027,19 @@ export async function updateCollection(
 
   setStored(STORAGE_KEYS.COLLECTIONS, collections);
 
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      await supabase.from('collections').update(updates).eq('id', id);
+      const period = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS).find(p => p.id === target.billing_period_id);
+      if (period) {
+        await supabase.from('billing_periods').upsert(period);
+      }
+    } catch (e) {
+      console.warn('Supabase sync error in updateCollection:', e);
+    }
+  }
+
   await addAuditLog({
     actor_user_id: actor.id,
     actor_name: actor.name,
@@ -1009,6 +1092,16 @@ export async function reverseCollection(
     period.payment_status = computePaymentStatus(period.total_amount_due, period.paid_amount, period.due_date);
     period.updated_at = new Date().toISOString();
     setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('collections').update({ status: 'Reversed', updated_by: actor.id, updated_by_name: actor.name, updated_at: target.updated_at }).eq('id', id);
+        await supabase.from('billing_periods').upsert(period);
+      } catch (e) {
+        console.warn('Supabase sync error in reverseCollection:', e);
+      }
+    }
   }
 
   await addAuditLog({
