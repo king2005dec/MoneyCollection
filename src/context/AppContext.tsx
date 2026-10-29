@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { CollectionSection, Customer, Collection, BillingPeriod, AuditLog } from '../types';
-import { getSections, initLocalDatabase, setBroadcastSender, scheduleBalanceMonitor } from '../services/databaseService';
+import { getSections, initLocalDatabase, setBroadcastSender, scheduleBalanceMonitor, importOctober26Data } from '../services/databaseService';
 import { getSupabaseClient } from '../services/supabaseClient';
 
 // Keys to sync over broadcast
@@ -130,8 +130,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     initLocalDatabase();
     refreshSections();
 
+    // One-time October-26 data reset & import from D1.pdf / D2.pdf
+    importOctober26Data({ id: 'usr-owner-001', name: 'Raj' }).then(res => {
+      if (res.s1 > 0 || res.s2 > 0) console.log('[Oct26 Import] Section 1:', res.s1, '| Section 2:', res.s2);
+    });
+
     // Start the background balance monitor (auto-close expired periods)
-    const stopMonitor = scheduleBalanceMonitor(60000); // check every 60 seconds
+    const stopMonitor = scheduleBalanceMonitor(60000);
     return () => {
       stopMonitor();
     };

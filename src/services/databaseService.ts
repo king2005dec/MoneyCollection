@@ -1517,3 +1517,158 @@ export async function bulkImportSection1(rows: any[], actor: { id: string; name:
   return { created };
 }
 
+// -------------------------------------------------------------
+// OCTOBER-26 DATA RESET & IMPORT (from public JSON files)
+// Deletes old Section 1 & 2 data, imports from D1.pdf / D2.pdf.
+// Runs once, guarded by 'oct26_data_imported' flag in localStorage.
+// -------------------------------------------------------------
+export async function importOctober26Data(actor: { id: string; name: string }): Promise<{ s1: number; s2: number }> {
+  const flag = getStored<Boolean>('oct26_data_imported', false);
+  if (flag === true) return { s1: 0, s2: 0 };
+
+  const S1_ID = 'sec-elec-001';
+  const S2_ID = 'sec-water-002';
+
+  // Fetch JSON from public folder
+  const [s1Resp, s2Resp] = await Promise.all([
+    fetch('/section1_data.json'),
+    fetch('/section2_data.json'),
+  ]);
+  const s1Data = await s1Resp.json();
+  const s2Data = await s2Resp.json();
+
+  // Delete old data for both sections
+  const customers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
+  const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
+  const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+
+  const removeIds = new Set(
+    customers
+      .filter(c => (c.assigned_section_ids || []).includes(S1_ID) || (c.assigned_section_ids || []).includes(S2_ID))
+      .map(c => c.id)
+  );
+
+  const remCustomers = customers.filter(c => !removeIds.has(c.id));
+  const remPeriods = periods.filter(p => !removeIds.has(p.customer_id));
+  const remCollections = collections.filter(c => !removeIds.has(c.customer_id));
+
+  setStored(STORAGE_KEYS.CUSTOMERS, remCustomers);
+  setStored(STORAGE_KEYS.BILLING_PERIODS, remPeriods);
+  setStored(STORAGE_KEYS.COLLECTIONS, remCollections);
+
+  const now = new Date().toISOString();
+  let s1Created = 0;
+  let s2Created = 0;
+
+  async function importSection(sectionId: string, data: any[], targetSectionId: string) {
+    let created = 0;
+    const custList = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, []);
+    const periodList = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, []);
+    const colList = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, []);
+
+    for (const row of data) {
+      try {
+        const code = row.customer_code || 'UNK-' + Date.now();
+        const cid = 'cust-' + code;
+        const opening = Number(row.prev_balance || 0);
+        const billAmt = Number(row.this_month || 0);
+        const paidAmt = Number(row.pay || 0);
+        const closing = Math.max(0, opening + billAmt - paidAmt);
+        const totalDue = opening + billAmt;
+        const curUnit = Number(row.current_unit || 0);
+        const prevUnit = Number(row.previous_unit || 0);
+        const units = Number(row.units_consumed || Math.max(0, curUnit - prevUnit));
+        const pid = 'bp-' + cid + '-' + targetSectionId + '-10-2026';
+
+        custList.push({
+          id: cid,
+          customer_code: code,
+          full_name: row.full_name || 'Unknown',
+          phone: '0000000000',
+          email: '',
+          house_number: '',
+          building_name: '',
+          address: 'Indore',
+          city: 'Indore',
+          notes: 'Imported from PDF October-26',
+          is_active: true,
+          assigned_section_ids: [targetSectionId],
+          created_by: actor.id,
+          created_at: now,
+          updated_at: now,
+        } as Customer);
+
+        periodList.push({
+          id: pid,
+          customer_id: cid,
+          section_id: targetSectionId,
+          billing_month: 10,
+          billing_year: 2026,
+          opening_balance: opening,
+          bill_amount: billAmt,
+          additional_charges: 0,
+          credits_or_adjustments: 0,
+          total_amount_due: totalDue,
+          paid_amount: paidAmt,
+          closing_balance: closing,
+          due_date: '2026-10-05',
+          payment_status: closing <= 0 ? 'Paid' : 'Pending',
+          current_unit: curUnit,
+          previous_unit: prevUnit,
+          units_consumed: units,
+          created_at: now,
+          updated_at: now,
+        } as BillingPeriod);
+
+        if (paidAmt > 0) {
+          const rn = 1000 + colList.length + 1;
+          colList.push({
+            id: 'col-' + Date.now().toString().slice(-6) + '-' + Math.random().toString(36).substr(2, 4),
+            receipt_number: 'RCP-202610-' + rn,
+            customer_id: cid,
+            billing_period_id: pid,
+            section_id: targetSectionId,
+            amount: paidAmt,
+            payment_method: 'Cash',
+            transaction_reference: undefined,
+            notes: 'Imported from PDF October-26',
+            status: 'Confirmed',
+            collection_date: '2026-10-05',
+            collection_time: '10:00:00',
+            created_by: actor.id,
+            created_by_name: actor.name,
+            created_at: now,
+            updated_at: now,
+          } as Collection);
+        }
+
+        created++;
+      } catch (e) {
+        console.error('Import error ' + row.customer_code + ':', e);
+      }
+    }
+
+    setStored(STORAGE_KEYS.CUSTOMERS, custList);
+    setStored(STORAGE_KEYS.BILLING_PERIODS, periodList);
+    setStored(STORAGE_KEYS.COLLECTIONS, colList);
+    return created;
+  }
+
+  s1Created = await importSection(S1_ID, s1Data, S1_ID);
+  s2Created = await importSection(S2_ID, s2Data, S2_ID);
+
+  setStored('oct26_data_imported', true);
+
+  await addAuditLog({
+    actor_user_id: actor.id,
+    actor_name: actor.name,
+    entity_type: 'section',
+    entity_id: 'bulk_import_oct26',
+    action_type: 'CREATE',
+    reason: 'October-26 data reset: imported ' + s1Created + ' Section 1 + ' + s2Created + ' Section 2 records from PDFs',
+  });
+  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS]);
+
+  return { s1: s1Created, s2: s2Created };
+}
+
