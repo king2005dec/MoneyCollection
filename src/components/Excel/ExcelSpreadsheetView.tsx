@@ -1247,7 +1247,14 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       )}
                     </td>
 
-                    {/* 3. This Month Bill - Editable by Owner, Read-Only for Staff */}
+                    {/* 3. Pay (Paid Amount) - Read Only in Table, Updated via Action > Update */}
+                    <td className="py-2 px-3 text-right font-black text-emerald-800 bg-[#e6f4ea]/70 border-r border-slate-200" title="Payment recorded via Action > Update">
+                      <div className="flex items-center justify-end">
+                        <span>{row.pay > 0 ? row.pay : 0}</span>
+                      </div>
+                    </td>
+
+                    {/* 4. This Month Bill - Editable by Owner, Read-Only for Staff */}
                     <td
                       onClick={() => {
                         handleCellClick(row.customer.id, row.targetSectionId, 'this_month', row.thisMonth, row.period?.id);
@@ -1289,7 +1296,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       )}
                     </td>
 
-                    {/* 4. Previous Balance - Editable by Owner, Read-Only for Staff */}
+                    {/* 5. Previous Balance - Editable by Owner, Read-Only for Staff */}
                     <td
                       onClick={() => {
                         handleCellClick(row.customer.id, row.targetSectionId, 'prev_balance', row.prevBalance, row.period?.id);
@@ -1331,19 +1338,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       )}
                     </td>
 
-                    {/* 5. Total Balance */}
+                    {/* 6. Total Balance */}
                     <td className="py-2 px-3 text-right font-bold text-slate-900 border-r border-slate-200">
                       {row.totalBalance > 0 ? row.totalBalance : 0}
-                    </td>
-
-                    {/* 6. Pay (Paid Amount) - Read Only in Table, Updated via Action > Update */}
-                    <td
-                      className="py-2 px-3 text-right font-black text-emerald-800 bg-[#e6f4ea]/70 border-r border-slate-200"
-                      title="Payment recorded via Action > Update"
-                    >
-                      <div className="flex items-center justify-end">
-                        <span>{row.pay > 0 ? row.pay : 0}</span>
-                      </div>
                     </td>
 
                     {/* 7. Current Balance (Pending Due) - Editable by Staff & Owner */}
