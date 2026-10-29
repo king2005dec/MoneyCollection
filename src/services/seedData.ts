@@ -114,6 +114,8 @@ export const INITIAL_SETTINGS: SystemSettings = {
   default_due_day: 15,
   receipt_prefix: 'RCP',
   allow_advance_payments: true,
+  balanceMonitorStartDate: '',
+  balanceMonitorEndDate: '',
 };
 
 export const INITIAL_CUSTOMERS: Customer[] = EXCEL_SEED_CUSTOMERS;

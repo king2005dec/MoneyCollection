@@ -863,7 +863,7 @@ export async function updateLastMonthPaidDirectly(
 function computePaymentStatus(totalDue: number, totalPaid: number, dueDate: string): PaymentStatus {
   if (totalPaid >= totalDue && totalDue > 0) return 'Paid';
   if (totalPaid > 0 && totalPaid < totalDue) return 'Partially Paid';
-  const today = '2026-10-22';
+  const today = new Date().toISOString().slice(0, 10);
   if (today > dueDate) return 'Overdue';
   return 'Pending';
 }
@@ -1279,6 +1279,89 @@ export async function addAuditLog(entry: Omit<AuditLog, 'id' | 'created_at'>): P
 }
 
 // -------------------------------------------------------------
+// DATE RANGE BALANCE MONITORING
+// If current date exceeds balanceMonitorEndDate (MM/DD/YYYY),
+// automatically revert closing_balance to opening_balance (previous balance)
+// for all billing periods that still have an outstanding current balance.
+// -------------------------------------------------------------
+export async function autoCloseExpiredBillingPeriods(actor?: { id: string; name: string }): Promise<{ closedCount: number }> {
+  const settings = await getSystemSettings();
+  const endDateStr = settings.balanceMonitorEndDate;
+  if (!endDateStr) return { closedCount: 0 };
+
+  // Parse end date from MM/DD/YYYY
+  const endParts = endDateStr.split('/');
+  if (endParts.length !== 3) return { closedCount: 0 };
+  const endMonth = parseInt(endParts[0], 10);
+  const endDay = parseInt(endParts[1], 10);
+  const endYear = parseInt(endParts[2], 10);
+  if (isNaN(endMonth) || isNaN(endDay) || isNaN(endYear)) return { closedCount: 0 };
+
+  const endDate = new Date(endYear, endMonth - 1, endDay, 23, 59, 59);
+  const now = new Date();
+
+  // Only act if current date exceeds end date
+  if (now <= endDate) return { closedCount: 0 };
+
+  const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
+  let closedCount = 0;
+  let changed = false;
+
+  for (const period of periods) {
+    if (period.closing_balance > 0 && period.closing_balance !== period.opening_balance) {
+      const prevClosing = period.closing_balance;
+      period.closing_balance = period.opening_balance; // revert to previous balance
+      period.total_amount_due = Number((period.paid_amount + period.closing_balance).toFixed(2));
+      period.payment_status = computePaymentStatus(period.total_amount_due, period.paid_amount, period.due_date);
+      period.updated_at = new Date().toISOString();
+      changed = true;
+      closedCount++;
+
+      await addAuditLog({
+        actor_user_id: actor?.id || 'system',
+        actor_name: actor?.name || 'System',
+        entity_type: 'billing_period',
+        entity_id: period.id,
+        action_type: 'STATUS_CHANGE',
+        previous_values: { closing_balance: prevClosing, payment_status: period.payment_status },
+        new_values: { closing_balance: period.closing_balance, payment_status: period.payment_status },
+        reason: `Auto-closed expired period (past end date ${endDateStr}): reverted current balance to previous balance`,
+      });
+    }
+  }
+
+  if (changed) {
+    setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
+    await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+  }
+
+  return { closedCount };
+}
+
+// Helper: check and auto-close on every app load / periodic tick
+export function scheduleBalanceMonitor(intervalMs: number = 60000): () => void {
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const runCheck = async () => {
+    try {
+      await autoCloseExpiredBillingPeriods();
+    } catch (e) {
+      console.warn('[BalanceMonitor] auto-close check failed:', e);
+    }
+  };
+
+  // Run immediately once
+  runCheck();
+
+  // Then poll at the given interval
+  timer = setInterval(runCheck, intervalMs);
+
+  return () => {
+    if (timer) clearInterval(timer);
+  };
+}
+
+// -------------------------------------------------------------
 // SYSTEM SETTINGS
 // -------------------------------------------------------------
 export async function getSystemSettings(): Promise<SystemSettings> {
@@ -1314,22 +1397,25 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   const collections = await getCollections();
   const customers = await getCustomers();
 
-  // Current month: October 2026
-  const currentMonthPeriods = periods.filter(p => p.billing_month === 10 && p.billing_year === 2026);
+  // Current month based on today's date
+  const today = new Date();
+  const currentMonth = today.getMonth() + 1;
+  const currentYear = today.getFullYear();
+  const todayStr = today.toISOString().slice(0, 10);
+  const currentMonthPeriods = periods.filter(p => p.billing_month === currentMonth && p.billing_year === currentYear);
   
   // Total Outstanding balance across all billing periods
   const totalOutstanding = periods.reduce((sum, p) => sum + Math.max(0, p.closing_balance), 0);
 
   // Collections filter
-  const todayStr = '2026-10-22';
   const confirmedCols = collections.filter(c => c.status === 'Confirmed');
 
   const totalCollectionToday = confirmedCols
     .filter(c => c.collection_date === todayStr)
     .reduce((sum, c) => sum + c.amount, 0);
 
-  // Current month collections (October 2026)
-  const currentMonthCols = confirmedCols.filter(c => c.collection_date.startsWith('2026-10'));
+  // Current month collections
+  const currentMonthCols = confirmedCols.filter(c => c.collection_date.startsWith(`${currentYear}-${String(currentMonth).padStart(2, '0')}`));
   const totalCollectionThisMonth = currentMonthCols.reduce((sum, c) => sum + c.amount, 0);
 
   const totalCashThisMonth = currentMonthCols

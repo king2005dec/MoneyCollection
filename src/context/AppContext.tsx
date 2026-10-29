@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { CollectionSection, Customer, Collection, BillingPeriod, AuditLog } from '../types';
-import { getSections, initLocalDatabase, setBroadcastSender } from '../services/databaseService';
+import { getSections, initLocalDatabase, setBroadcastSender, scheduleBalanceMonitor } from '../services/databaseService';
 import { getSupabaseClient } from '../services/supabaseClient';
 
 // Keys to sync over broadcast
@@ -129,6 +129,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     initLocalDatabase();
     refreshSections();
+
+    // Start the background balance monitor (auto-close expired periods)
+    const stopMonitor = scheduleBalanceMonitor(60000); // check every 60 seconds
+    return () => {
+      stopMonitor();
+    };
   }, []);
 
   const triggerDbRefresh = () => {
@@ -144,7 +150,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   //   3. ALL other devices receive the payload and write it to their localStorage
   //   4. triggerDbRefresh() causes them to re-render with the new data
   // ────────────────────────────────────────────────────────────────────────────
-  const supabaseBroadcastRef = useRef<ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null>(null);
+  const supabaseBroadcastRef = useRef<any>(null);
 
   useEffect(() => {
     const supabase = getSupabaseClient();

@@ -157,6 +157,8 @@ export interface SystemSettings {
   default_due_day: number;
   receipt_prefix: string;
   allow_advance_payments: boolean;
+  balanceMonitorStartDate?: string; // MM/DD/YYYY
+  balanceMonitorEndDate?: string;   // MM/DD/YYYY
 }
 
 export interface DashboardMetrics {
