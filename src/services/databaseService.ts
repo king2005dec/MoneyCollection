@@ -1371,10 +1371,11 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     totalCollectionThisMonth,
     totalCashThisMonth,
     totalOnlineThisMonth,
-    fullyPaidCount,
-    partiallyPaidCount,
-    overdueCount,
-    pendingCount,
+    totalPendingCustomers: pendingCount,
+    fullyPaidCustomers: fullyPaidCount,
+    partiallyPaidCustomers: partiallyPaidCount,
+    overdueCustomers: overdueCount,
+    totalCustomers: customers.length,
   };
 }
 

@@ -6,10 +6,12 @@ import {
   BillingPeriod,
   CollectionSection,
   PaymentStatus,
+  Collection,
 } from '../../types';
 import {
   getCustomers,
   getBillingPeriods,
+  getCollections,
   getSections,
   updateBillingPeriodCharges,
   updateRemainingDueDirectly,
@@ -55,6 +57,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [billingPeriods, setBillingPeriods] = useState<BillingPeriod[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
   const [sections, setSections] = useState<CollectionSection[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -174,13 +177,15 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     const load = async () => {
       setLoading(true);
       try {
-        const [c, b, s] = await Promise.all([
+        const [c, b, col, s] = await Promise.all([
           getCustomers(),
           getBillingPeriods(),
+          getCollections(),
           getSections(),
         ]);
         setCustomers(c);
         setBillingPeriods(b);
+        setCollections(col);
         setSections(s);
       } catch (err) {
         console.error('Failed to load data for Ledger view:', err);
@@ -203,6 +208,17 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       : activeTab === 'sec-other-003'
       ? 'Section 3 (C)'
       : 'All Customers';
+
+  // Payment type (Cash / UPI / etc.) recorded for a customer in a given month
+  const getPaymentType = (customerId: string, month: number, year: number): string => {
+    const col = collections.find(
+      c =>
+        c.customer_id === customerId &&
+        c.collection_date &&
+        c.collection_date.startsWith(`${year}-${String(month).padStart(2, '0')}`)
+    );
+    return col?.payment_method ? String(col.payment_method) : '-';
+  };
 
   // Filter customers by active tab
   const relevantCustomers = customers.filter(c => {
@@ -1633,6 +1649,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                   <th className="p-2 border border-slate-200 text-right">PREBALANCE BILL</th>
                                   <th className="p-2 border border-slate-200 text-right">TOTAL BILL</th>
                                   <th className="p-2 border border-slate-200 text-right bg-emerald-50 text-emerald-900">PAY</th>
+                                  <th className="p-2 border border-slate-200 text-center">PAYMENT TYPE</th>
                                   <th className="p-2 border border-slate-200 text-right">CURRENT BILL</th>
                                   <th className="p-2 border border-slate-200 text-center w-24">INVOICE</th>
                                 </tr>
@@ -1657,6 +1674,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                         <td className="p-2 border border-slate-200 text-right font-bold text-amber-700">{formatCurrency(row.prevBalance)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-slate-900">{formatCurrency(row.totalBalance)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-emerald-700 bg-emerald-50/50">{formatCurrency(row.pay)}</td>
+                                        <td className="p-2 border border-slate-200 text-center font-medium">
+                                          {getPaymentType(row.customer.id, selectedMonth, selectedYear)}
+                                        </td>
                                         <td className="p-2 border border-slate-200 text-right font-black text-rose-800">{formatCurrency(row.currentBalance)}</td>
                                         <td className="p-2 border border-slate-200 text-center">
                                           <button
@@ -1708,6 +1728,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                         <td className="p-2 border border-slate-200 text-right font-bold text-amber-700">{formatCurrency(hp.opening_balance)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-slate-900">{formatCurrency(hp.total_amount_due)}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-emerald-700 bg-emerald-50/50">{formatCurrency(hp.paid_amount)}</td>
+                                        <td className="p-2 border border-slate-200 text-center font-medium">
+                                          {getPaymentType(row.customer.id, hp.billing_month, hp.billing_year)}
+                                        </td>
                                         <td className="p-2 border border-slate-200 text-right font-black text-rose-800">{formatCurrency(Math.max(0, hp.closing_balance))}</td>
                                         <td className="p-2 border border-slate-200 text-center">
                                           <button
