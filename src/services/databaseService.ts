@@ -1081,7 +1081,7 @@ export async function updateCollection(
   // Apply updates
   if (updates.amount !== undefined) target.amount = updates.amount;
   if (updates.notes !== undefined) target.notes = updates.notes;
-  if (updates.transaction_reference !== undefined) target.transaction_reference = updates.transaction_reference;
+  if (updates.transaction_reference !== undefined) target.transaction_reference = updates.transaction_reference || undefined;
   if (updates.payment_method !== undefined) target.payment_method = updates.payment_method;
 
   target.updated_by = actor.id;
@@ -1105,17 +1105,22 @@ export async function updateCollection(
   setStored(STORAGE_KEYS.COLLECTIONS, collections);
 
   const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      await supabase.from('collections').update(updates).eq('id', id);
-      const period = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS).find(p => p.id === target.billing_period_id);
-      if (period) {
-        await supabase.from('billing_periods').upsert(period);
-      }
-    } catch (e) {
-      console.warn('Supabase sync error in updateCollection:', e);
-    }
-  }
+   if (supabase) {
+     try {
+       const payload: any = {};
+       if (updates.amount !== undefined) payload.amount = updates.amount;
+       if (updates.notes !== undefined) payload.notes = updates.notes;
+       if (updates.transaction_reference !== undefined) payload.transaction_reference = updates.transaction_reference || null;
+       if (updates.payment_method !== undefined) payload.payment_method = updates.payment_method;
+       await supabase.from('collections').update(payload).eq('id', id);
+       const period = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS).find(p => p.id === target.billing_period_id);
+       if (period) {
+         await supabase.from('billing_periods').upsert(period);
+       }
+     } catch (e) {
+       console.warn('Supabase sync error in updateCollection:', e);
+     }
+   }
 
   await addAuditLog({
     actor_user_id: actor.id,
