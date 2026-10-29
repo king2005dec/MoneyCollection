@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import {
@@ -209,16 +209,24 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       ? 'Section 3 (C)'
       : 'All Customers';
 
-  // Payment type (Cash / UPI / etc.) recorded for a customer in a given month
-  const getPaymentType = (customerId: string, month: number, year: number): string => {
-    const col = collections.find(
-      c =>
-        c.customer_id === customerId &&
-        c.collection_date &&
-        c.collection_date.startsWith(`${year}-${String(month).padStart(2, '0')}`)
-    );
-    return col?.payment_method ? String(col.payment_method) : '-';
-  };
+  // Memoized collection lookup: customer_id + month-key -> payment_method
+  const collectionLookup = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of collections) {
+      if (!c.customer_id || !c.collection_date) continue;
+      const key = `${c.customer_id}|${c.collection_date.slice(0, 7)}`; // YYYY-MM
+      // Keep the latest confirmed collection per customer-month
+      if (!map.has(key) || c.status === 'Confirmed') {
+        map.set(key, String(c.payment_method || '-'));
+      }
+    }
+    return map;
+  }, [collections]);
+
+  const getPaymentType = useCallback((customerId: string, month: number, year: number): string => {
+    const key = `${customerId}|${year}-${String(month).padStart(2, '0')}`;
+    return collectionLookup.get(key) || '-';
+  }, [collectionLookup]);
 
   // Filter customers by active tab
   const relevantCustomers = customers.filter(c => {
@@ -226,8 +234,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     return c.assigned_section_ids.includes(activeTab);
   });
 
-  // Build spreadsheet rows matching Google Sheets structure
-  const spreadsheetRows = relevantCustomers.map(cust => {
+  // Build spreadsheet rows matching Google Sheets structure (memoized)
+  const spreadsheetRows = useMemo(() => relevantCustomers.map(cust => {
     const targetSectionId = activeTab === 'all'
       ? (cust.assigned_section_ids[0] || section1.id)
       : activeTab;
@@ -282,46 +290,58 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       isPaid: currentBalance <= 0,
       paymentStatus: period?.payment_status || (currentBalance <= 0 ? 'Paid' : 'Pending'),
     };
-  });
+  }), [customers, billingPeriods, selectedMonth, selectedYear, activeTab, section1]);
 
-  // Calculate totals
-  const totalPay = spreadsheetRows.reduce((sum, r) => sum + r.pay, 0);
-  const totalThisMonth = spreadsheetRows.reduce((sum, r) => sum + r.thisMonth, 0);
-  const totalPrevBalance = spreadsheetRows.reduce((sum, r) => sum + r.prevBalance, 0);
-  const totalGrandBalance = spreadsheetRows.reduce((sum, r) => sum + r.totalBalance, 0);
-  const totalCurrentBalance = spreadsheetRows.reduce((sum, r) => sum + r.currentBalance, 0);
-  const totalPendingCustomersCount = spreadsheetRows.filter(r => r.currentBalance > 0).length;
+  // Calculate totals (memoized)
+  const totals = useMemo(() => {
+    const totalPay = spreadsheetRows.reduce((sum, r) => sum + r.pay, 0);
+    const totalThisMonth = spreadsheetRows.reduce((sum, r) => sum + r.thisMonth, 0);
+    const totalPrevBalance = spreadsheetRows.reduce((sum, r) => sum + r.prevBalance, 0);
+    const totalGrandBalance = spreadsheetRows.reduce((sum, r) => sum + r.totalBalance, 0);
+    const totalCurrentBalance = spreadsheetRows.reduce((sum, r) => sum + r.currentBalance, 0);
+    const totalPendingCustomersCount = spreadsheetRows.filter(r => r.currentBalance > 0).length;
+    return {
+      totalPay,
+      totalThisMonth,
+      totalPrevBalance,
+      totalGrandBalance,
+      totalCurrentBalance,
+      totalPendingCustomersCount,
+    };
+  }, [spreadsheetRows]);
 
-  // Apply filters: Search, Pending Only, & Date Range
-  const filteredRows = spreadsheetRows.filter(row => {
-    if (pendingAbove499 && row.currentBalance <= 499) return false;
+  // Apply filters: Search, Pending Only, & Date Range (memoized)
+  const filteredRows = useMemo(() => {
+    const filtered = spreadsheetRows.filter(row => {
+      if (pendingAbove499 && row.currentBalance <= 499) return false;
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchName = row.name.toLowerCase().includes(q);
-      const matchCode = row.customerCode.toLowerCase().includes(q);
-      const matchHouse = row.customer.house_number?.toLowerCase().includes(q);
-      if (!matchName && !matchCode && !matchHouse) return false;
-    }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchName = row.name.toLowerCase().includes(q);
+        const matchCode = row.customerCode.toLowerCase().includes(q);
+        const matchHouse = row.customer.house_number?.toLowerCase().includes(q);
+        if (!matchName && !matchCode && !matchHouse) return false;
+      }
 
-    if (startDate || endDate) {
-      const periodDate = row.period?.created_at ? row.period.created_at.slice(0, 10) : '2026-10-22';
-      if (startDate && periodDate < startDate) return false;
-      if (endDate && periodDate > endDate) return false;
-    }
+      if (startDate || endDate) {
+        const periodDate = row.period?.created_at ? row.period.created_at.slice(0, 10) : '2026-10-22';
+        if (startDate && periodDate < startDate) return false;
+        if (endDate && periodDate > endDate) return false;
+      }
 
-    return true;
-  });
+      return true;
+    });
 
-  // Natural sorting by ID (A1, A2... A30, B1, B2... C1...)
-  filteredRows.sort((a, b) => {
-    const numA = parseInt(a.customerCode.replace(/\D/g, ''), 10) || 0;
-    const numB = parseInt(b.customerCode.replace(/\D/g, ''), 10) || 0;
-    if (a.customerCode.charAt(0) !== b.customerCode.charAt(0)) {
-      return a.customerCode.localeCompare(b.customerCode);
-    }
-    return numA - numB;
-  });
+    // Natural sorting by ID (A1, A2... A30, B1, B2... C1...)
+    return filtered.sort((a, b) => {
+      const numA = parseInt(a.customerCode.replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(b.customerCode.replace(/\D/g, ''), 10) || 0;
+      if (a.customerCode.charAt(0) !== b.customerCode.charAt(0)) {
+        return a.customerCode.localeCompare(b.customerCode);
+      }
+      return numA - numB;
+    });
+  }, [spreadsheetRows, pendingAbove499, searchQuery, startDate, endDate]);
 
   // Permission-aware cell click trigger
   const handleCellClick = (
@@ -876,13 +896,13 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             {/* Total Due */}
             <div className="px-3 py-1.5 bg-slate-100 rounded-lg border border-slate-200">
               <span className="text-[10px] text-slate-500 font-bold uppercase block">Total Due</span>
-              <span className="font-extrabold text-slate-800 text-xs">{formatCurrency(totalGrandBalance)}</span>
+              <span className="font-extrabold text-slate-800 text-xs">{formatCurrency(totals.totalGrandBalance)}</span>
             </div>
 
             {/* Collected */}
             <div className="px-3 py-1.5 bg-emerald-50 rounded-lg border border-emerald-200">
               <span className="text-[10px] text-emerald-700 font-bold uppercase block">Paid (Pay)</span>
-              <span className="font-extrabold text-emerald-800 text-xs">{formatCurrency(totalPay)}</span>
+              <span className="font-extrabold text-emerald-800 text-xs">{formatCurrency(totals.totalPay)}</span>
             </div>
 
             {/* CLICKABLE PENDING BALANCE BOX (Toggles Pending > ₹499 Filter) */}
@@ -903,11 +923,11 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
                   pendingAbove499 ? 'bg-white text-rose-700' : 'bg-rose-200 text-rose-900'
                 }`}>
-                  {totalPendingCustomersCount} Pending
+                  {totals.totalPendingCustomersCount} Pending
                 </span>
               </div>
               <span className={`font-black text-xs block ${pendingAbove499 ? 'text-white' : 'text-rose-700'}`}>
-                {formatCurrency(totalCurrentBalance)}
+                {formatCurrency(totals.totalCurrentBalance)}
               </span>
               <span className="text-[9px] block opacity-90 underline font-semibold mt-0.5">
                 {pendingAbove499 ? '✓ Filter Active: Pending above ₹499 (Click for All)' : '👉 Click to Filter Pending > ₹499'}
@@ -1777,19 +1797,19 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                 Grand Total ({filteredRows.length} rows):
               </td>
               <td className="py-2.5 px-3 text-right text-rose-900 bg-rose-100 border-r border-slate-300 text-xs">
-                {formatCurrency(totalThisMonth)}
+                {formatCurrency(totals.totalThisMonth)}
               </td>
               <td className="py-2.5 px-3 text-right text-amber-900 bg-amber-100 border-r border-slate-300 text-xs">
-                {formatCurrency(totalPrevBalance)}
+                {formatCurrency(totals.totalPrevBalance)}
               </td>
               <td className="py-2.5 px-3 text-right border-r border-slate-300 text-xs">
-                {formatCurrency(totalGrandBalance)}
+                {formatCurrency(totals.totalGrandBalance)}
               </td>
               <td className="py-2.5 px-3 text-right text-emerald-900 bg-emerald-100 border-r border-slate-300 text-xs">
-                {formatCurrency(totalPay)}
+                {formatCurrency(totals.totalPay)}
               </td>
               <td className="py-2.5 px-3 text-right text-rose-700 bg-rose-100 text-xs font-black border-r border-slate-300">
-                {formatCurrency(totalCurrentBalance)}
+                {formatCurrency(totals.totalCurrentBalance)}
               </td>
               <td colSpan={7} className="py-2.5 px-3 text-slate-500 text-xs font-semibold">
                 {isOwner
