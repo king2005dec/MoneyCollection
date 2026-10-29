@@ -1279,26 +1279,35 @@ export async function addAuditLog(entry: Omit<AuditLog, 'id' | 'created_at'>): P
 }
 
 // -------------------------------------------------------------
-// DATE RANGE BALANCE MONITORING
-// If current date exceeds balanceMonitorEndDate (MM/DD/YYYY),
-// automatically revert closing_balance to opening_balance (previous balance)
-// for all billing periods that still have an outstanding current balance.
+// DATE RANGE BALANCE MONITORING (5th-to-5th billing cycle)
+// Meter data runs 5th of month → 5th of next month.
+// If current date exceeds the end date (5th of current month),
+// automatically revert closing_balance to opening_balance
+// (previous balance) for expired billing periods.
 // -------------------------------------------------------------
 export async function autoCloseExpiredBillingPeriods(actor?: { id: string; name: string }): Promise<{ closedCount: number }> {
   const settings = await getSystemSettings();
-  const endDateStr = settings.balanceMonitorEndDate;
-  if (!endDateStr) return { closedCount: 0 };
 
-  // Parse end date from MM/DD/YYYY
-  const endParts = endDateStr.split('/');
-  if (endParts.length !== 3) return { closedCount: 0 };
-  const endMonth = parseInt(endParts[0], 10);
-  const endDay = parseInt(endParts[1], 10);
-  const endYear = parseInt(endParts[2], 10);
-  if (isNaN(endMonth) || isNaN(endDay) || isNaN(endYear)) return { closedCount: 0 };
-
-  const endDate = new Date(endYear, endMonth - 1, endDay, 23, 59, 59);
   const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+
+  // Use configured dates if provided, otherwise default to 5th-to-5th cycle
+  let endDate: Date;
+  let endLabel: string;
+  if (settings.balanceMonitorEndDate) {
+    const parts = settings.balanceMonitorEndDate.split('/');
+    if (parts.length === 3) {
+      endDate = new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10), 23, 59, 59);
+      endLabel = settings.balanceMonitorEndDate;
+    } else {
+      endDate = new Date(now.getFullYear(), now.getMonth(), 5, 23, 59, 59);
+      endLabel = `${String(now.getMonth() + 1).padStart(2, '0')}/05/${now.getFullYear()}`;
+    }
+  } else {
+    // Default: end date = 5th of current month
+    endDate = new Date(now.getFullYear(), now.getMonth(), 5, 23, 59, 59);
+    endLabel = `${String(now.getMonth() + 1).padStart(2, '0')}/05/${now.getFullYear()}`;
+  }
 
   // Only act if current date exceeds end date
   if (now <= endDate) return { closedCount: 0 };
@@ -1323,9 +1332,9 @@ export async function autoCloseExpiredBillingPeriods(actor?: { id: string; name:
         entity_type: 'billing_period',
         entity_id: period.id,
         action_type: 'STATUS_CHANGE',
-        previous_values: { closing_balance: prevClosing, payment_status: period.payment_status },
-        new_values: { closing_balance: period.closing_balance, payment_status: period.payment_status },
-        reason: `Auto-closed expired period (past end date ${endDateStr}): reverted current balance to previous balance`,
+        previous_values: { closing_balance: prevClosing },
+        new_values: { closing_balance: period.closing_balance },
+        reason: `Auto-closed expired 5th-to-5th cycle (past ${endLabel}): reverted current balance to previous balance`,
       });
     }
   }
