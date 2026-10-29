@@ -144,9 +144,13 @@ export const DashboardView: React.FC = () => {
     if (selectedEmployeeFilter !== 'all' && col.created_by !== selectedEmployeeFilter) return false;
     if (selectedMethodFilter !== 'all' && col.payment_method !== selectedMethodFilter) return false;
 
+    const today = new Date().toISOString().slice(0, 10);
+    const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    if (dateFilter === 'today' && col.collection_date !== today) return false;
+    if (dateFilter === 'yesterday' && col.collection_date !== yest) return false;
+
     const cust = customers.find(c => c.id === col.customer_id);
     if (showPendingAbove500) {
-      // Find outstanding for this customer
       const custPeriods = billingPeriods.filter(p => p.customer_id === col.customer_id);
       const totalDue = custPeriods.reduce((sum, p) => sum + Math.max(0, p.closing_balance), 0);
       if (totalDue < 500) return false;
@@ -179,7 +183,7 @@ export const DashboardView: React.FC = () => {
         {/* Date Filter Badges */}
         <div className="flex flex-wrap items-center gap-1.5 bg-slate-100/90 p-1 rounded-xl text-xs font-semibold">
           <button
-            onClick={() => setDateFilter('today')}
+            onClick={() => { setDateFilter('today'); setShowPendingAbove500(false); }}
             className={`px-3 py-1.5 rounded-lg transition ${
               dateFilter === 'today' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
@@ -187,7 +191,7 @@ export const DashboardView: React.FC = () => {
             Today
           </button>
           <button
-            onClick={() => setDateFilter('yesterday')}
+            onClick={() => { setDateFilter('yesterday'); setShowPendingAbove500(false); }}
             className={`px-3 py-1.5 rounded-lg transition ${
               dateFilter === 'yesterday' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
