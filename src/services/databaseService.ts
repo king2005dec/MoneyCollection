@@ -1291,7 +1291,21 @@ export async function autoCloseExpiredBillingPeriods(actor?: { id: string; name:
   const now = new Date();
   const todayStr = now.toISOString().slice(0, 10);
 
-  // Use configured dates if provided, otherwise default to 5th-to-5th cycle
+  // Respect cycle start date (default 10/05/2026)
+  let startDate: Date | null = null;
+  if (settings.balanceMonitorStartDate) {
+    const parts = settings.balanceMonitorStartDate.split('/');
+    if (parts.length === 3) {
+      startDate = new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10), 0, 0, 0);
+    }
+  } else {
+    startDate = new Date(2026, 9, 5, 0, 0, 0); // default 10/05/2026
+  }
+
+  // Do not run before the cycle start date
+  if (startDate && now < startDate) return { closedCount: 0 };
+
+  // Use configured end date if provided, otherwise default to 5th-to-5th cycle
   let endDate: Date;
   let endLabel: string;
   if (settings.balanceMonitorEndDate) {

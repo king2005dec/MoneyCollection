@@ -1386,15 +1386,20 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       {row.totalBalance > 0 ? row.totalBalance : 0}
                     </td>
 
-                    {/* 7. Current Balance (Pending Due) - Editable by Staff & Owner */}
+                    {/* 7. Current Balance (Pending Due) - Owner only direct edit, Staff read-only */}
                     <td
                       onClick={() => {
+                        if (!isOwner) return;
                         handleCellClick(row.customer.id, row.targetSectionId, 'closing_balance', row.currentBalance, row.period?.id);
                       }}
-                      className={`py-2 px-3 text-right font-black border-r border-slate-200 cursor-pointer hover:bg-rose-100 group ${
+                      className={`py-2 px-3 text-right font-bold border-r border-slate-200 ${
+                        isOwner
+                          ? 'cursor-pointer hover:bg-rose-100 group'
+                          : 'cursor-default opacity-70'
+                      } ${
                         row.currentBalance > 0 ? 'text-rose-700 bg-rose-50/80' : 'text-slate-400'
                       }`}
-                      title="Click to directly update remaining balance"
+                      title={isOwner ? 'Click to directly update remaining balance' : 'Staff cannot edit current balance directly. Use Action > Update.'}
                     >
                       {editingCell?.customerId === row.customer.id && editingCell?.field === 'closing_balance' ? (
                         <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
@@ -1527,15 +1532,13 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       {row.name}
                     </td>
 
-                    {/* 11. Current Unit - Editable by Owner, Read-Only for Staff */}
+                    {/* 11. Current Unit - Editable by Staff & Owner */}
                     <td
                       onClick={() => {
                         handleCellClick(row.customer.id, row.targetSectionId, 'current_unit', row.currentUnit, row.period?.id);
                       }}
-                      className={`py-2 px-2.5 text-right font-bold text-slate-800 border-r border-slate-200 group ${
-                        isOwner ? 'cursor-pointer hover:bg-blue-50' : 'cursor-default'
-                      }`}
-                      title={isOwner ? 'Click to update meter reading' : 'Staff cannot edit meter readings (Owner only)'}
+                      className={`py-2 px-2.5 text-right font-bold text-slate-800 border-r border-slate-200 group cursor-pointer hover:bg-blue-50`}
+                      title="Click to update meter reading"
                     >
                       {editingCell?.customerId === row.customer.id && editingCell?.field === 'current_unit' ? (
                         <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
@@ -1654,7 +1657,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                   <th className="p-2 border border-slate-200 text-right">TOTAL BILL</th>
                                   <th className="p-2 border border-slate-200 text-right bg-emerald-50 text-emerald-900">PAY</th>
                                   <th className="p-2 border border-slate-200 text-center">PAYMENT TYPE</th>
-                                  <th className="p-2 border border-slate-200 text-right">CURRENT BILL</th>
+                                  <th className="p-2 border border-slate-200 text-right">CURRENT BALANCE</th>
                                   <th className="p-2 border border-slate-200 text-center w-24">INVOICE</th>
                                 </tr>
                               </thead>

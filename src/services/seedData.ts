@@ -114,7 +114,7 @@ export const INITIAL_SETTINGS: SystemSettings = {
   default_due_day: 15,
   receipt_prefix: 'RCP',
   allow_advance_payments: true,
-  balanceMonitorStartDate: '',
+  balanceMonitorStartDate: '10/05/2026',
   balanceMonitorEndDate: '',
 };
 
