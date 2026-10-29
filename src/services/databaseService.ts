@@ -1040,7 +1040,7 @@ export async function updateCollection(
   // Apply updates
   if (updates.amount !== undefined) target.amount = updates.amount;
   if (updates.notes !== undefined) target.notes = updates.notes;
-  if (updates.transaction_reference !== undefined) target.transaction_reference = updates.transaction_reference || null;
+  if (updates.transaction_reference !== undefined) target.transaction_reference = updates.transaction_reference || undefined;
   if (updates.payment_method !== undefined) target.payment_method = updates.payment_method;
 
   target.updated_by = actor.id;

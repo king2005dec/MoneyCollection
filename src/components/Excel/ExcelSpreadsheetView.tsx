@@ -154,9 +154,10 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   // UPI Google Pay QR Modal State
   const [upiModalData, setUpiModalData] = useState<{
     customerName: string;
-    customerCode?: string;
+    customerCode: string;
     customerId: string;
     sectionId: string;
+    periodId?: string;
     currentBalance: number;
     initialAmount?: number;
   } | null>(null);
@@ -581,7 +582,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       name: currentUser?.full_name || (isOwner ? 'Owner' : 'Staff Collector'),
     };
 
-    const periodId = `bp-${upiModalData.customerId}-${upiModalData.sectionId}-${selectedMonth}-${selectedYear}`;
+    const periodId = upiModalData.periodId || `bp-${upiModalData.customerId}-${upiModalData.sectionId}-${selectedMonth}-${selectedYear}`;
     await addCollection(
       {
         customer_id: upiModalData.customerId,
@@ -1129,21 +1130,21 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <th className="py-2 px-3 min-w-[140px] border-r border-slate-300 bg-slate-100 sticky top-[37px]">
                 Name {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
               </th>
-              <th className="py-2 px-3 text-right bg-[#fce8e6] text-rose-900 border-r border-slate-300 sticky top-[37px]">
-                This Month {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
-              </th>
-              <th className="py-2 px-3 text-right bg-[#fff2cc] text-amber-900 border-r border-slate-300 sticky top-[37px]">
-                Prev Balance {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
-              </th>
-              <th className="py-2 px-3 text-right border-r border-slate-300 font-extrabold bg-slate-100 sticky top-[37px]">
-                Total Balance
-              </th>
-              <th className="py-2 px-3 text-right bg-[#e6f4ea] text-emerald-900 border-r border-slate-300 sticky top-[37px]">
-                Pay (Paid)
-              </th>
-              <th className="py-2 px-3 text-right bg-rose-50 text-rose-950 font-black border-r border-slate-300 sticky top-[37px]">
-                Current Balance
-              </th>
+               <th className="py-2 px-3 text-right bg-[#fce8e6] text-rose-900 border-r border-slate-300 sticky top-[37px]">
+                 This Month {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
+               </th>
+               <th className="py-2 px-3 text-right bg-[#e6f4ea] text-emerald-900 border-r border-slate-300 sticky top-[37px]">
+                 Pay (Paid)
+               </th>
+               <th className="py-2 px-3 text-right bg-[#fff2cc] text-amber-900 border-r border-slate-300 sticky top-[37px]">
+                 Prev Balance {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
+               </th>
+               <th className="py-2 px-3 text-right border-r border-slate-300 font-extrabold bg-slate-100 sticky top-[37px]">
+                 Total Balance
+               </th>
+               <th className="py-2 px-3 text-right bg-rose-50 text-rose-950 font-black border-r border-slate-300 sticky top-[37px]">
+                 Current Balance
+               </th>
               <th className="py-2 px-2.5 text-center border-r-2 border-emerald-400 min-w-[160px] bg-slate-100 sticky top-[37px]">
                 Actions
               </th>
@@ -1405,8 +1406,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                             setUpiModalData({
                               customerName: row.name,
                               customerCode: row.customerCode,
-                              customerId: row.customer.id,
-                              sectionId: row.targetSectionId,
+                               customerId: row.customer.id,
+                               sectionId: row.targetSectionId,
+                               periodId: row.period?.id,
                               currentBalance: row.currentBalance,
                               initialAmount: row.currentBalance > 0 ? row.currentBalance : undefined,
                             });
@@ -1795,6 +1797,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                     customerCode: cust.customer.customer_code,
                     customerId: cust.customer.id,
                     sectionId: cust.sectionId,
+                    periodId: cust.period?.id,
                     currentBalance: cust.currentBalance,
                     initialAmount: cust.currentBalance > 0 ? cust.currentBalance : undefined,
                   });
