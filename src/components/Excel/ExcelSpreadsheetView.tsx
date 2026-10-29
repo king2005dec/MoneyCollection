@@ -314,9 +314,12 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     currentVal: string | number,
     periodId?: string
   ) => {
-    // If staff (not owner), they record payment via Action > Update modal
-    if (!isOwner && field !== 'closing_balance') {
-      showToast('Staff can record payments using Action > Update. Owner permission required for resident details, bills and meter readings.', 'info');
+    if (!isOwner && field === 'closing_balance') {
+      showToast('Staff cannot edit current balance directly. Use Action > Update to record payment.', 'info');
+      return;
+    }
+    if (!isOwner && (field === 'name' || field === 'this_month' || field === 'prev_balance' || field === 'prev_unit')) {
+      showToast('Only Owner can edit this field. Staff can edit Current Unit and record payments via Action > Update.', 'info');
       return;
     }
 
@@ -428,8 +431,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           showToast(`Updated previous balance to ${formatCurrency(numVal)}`);
         }
       } else if (field === 'current_unit') {
-        if (!isOwner) {
-          showToast('Staff can only update balance. Owner has permission to edit meter readings.', 'error');
+        if (!isOwner && !currentUser) {
+          showToast('Permission required to edit meter reading.', 'error');
           setEditingCell(null);
           return;
         }
@@ -449,9 +452,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           const prevU = targetPeriod.previous_unit || 0;
           const consumed = Math.max(0, numVal - prevU);
           
-          // Tiered billing rule requested:
-          // <= 79 units: (units * 15) + 400
-          // >= 80 units: units * 20 (no additional add)
           let newBill = 0;
           if (consumed <= 79) {
             newBill = (consumed * 15) + 400;
@@ -465,12 +465,22 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               current_unit: numVal,
               bill_amount: newBill,
             },
-            `Owner updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
+            `Updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
             actor
           );
           showToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
+        } else {
+          // Create/update period if missing
+          await updateBillingPeriodCharges(
+            `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}` as any,
+            {
+              current_unit: numVal,
+            } as any,
+            `Updated meter reading to ${numVal}`,
+            actor
+          );
+          showToast(`Updated meter reading to ${numVal}!`);
         }
-      } else if (field === 'prev_unit') {
         if (!isOwner) {
           showToast('Only Owner can edit previous meter readings.', 'error');
           setEditingCell(null);
@@ -582,23 +592,28 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     };
 
     const periodId = `bp-${upiModalData.customerId}-${upiModalData.sectionId}-${selectedMonth}-${selectedYear}`;
-    await addCollection(
-      {
-        customer_id: upiModalData.customerId,
-        section_id: upiModalData.sectionId,
-        billing_period_id: periodId,
-        amount: paidAmount,
-        payment_method: 'UPI',
-        collection_date: new Date().toISOString().slice(0, 10),
-        collection_time: new Date().toTimeString().slice(0, 8),
-        notes: `UPI QR payment received (Raj)${utr ? ` • UTR: ${utr}` : ''}`,
-        created_by: actor.id,
-        created_by_name: actor.name,
-      },
-      actor
-    );
-    showToast(`Received UPI payment of ${formatCurrency(paidAmount)} for ${upiModalData.customerName}!`);
-    triggerDbRefresh();
+    try {
+      await addCollection(
+        {
+          customer_id: upiModalData.customerId,
+          section_id: upiModalData.sectionId,
+          billing_period_id: periodId,
+          amount: paidAmount,
+          payment_method: 'UPI',
+          collection_date: new Date().toISOString().slice(0, 10),
+          collection_time: new Date().toTimeString().slice(0, 8),
+          notes: `UPI QR payment received (Raj)${utr ? ` • UTR: ${utr}` : ''}`,
+          created_by: actor.id,
+          created_by_name: actor.name,
+        },
+        actor
+      );
+      showToast(`Received UPI payment of ${formatCurrency(paidAmount)} for ${upiModalData.customerName}!`);
+      setUpiModalData(null);
+      triggerDbRefresh();
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to record UPI payment', 'error');
+    }
   };
 
   // Export CSV / Excel Compatible Handler

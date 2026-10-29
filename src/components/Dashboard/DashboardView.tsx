@@ -63,6 +63,7 @@ export const DashboardView: React.FC = () => {
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string>('all');
   const [selectedMethodFilter, setSelectedMethodFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showPendingAbove500, setShowPendingAbove500] = useState<boolean>(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -143,9 +144,16 @@ export const DashboardView: React.FC = () => {
     if (selectedEmployeeFilter !== 'all' && col.created_by !== selectedEmployeeFilter) return false;
     if (selectedMethodFilter !== 'all' && col.payment_method !== selectedMethodFilter) return false;
 
+    const cust = customers.find(c => c.id === col.customer_id);
+    if (showPendingAbove500) {
+      // Find outstanding for this customer
+      const custPeriods = billingPeriods.filter(p => p.customer_id === col.customer_id);
+      const totalDue = custPeriods.reduce((sum, p) => sum + Math.max(0, p.closing_balance), 0);
+      if (totalDue < 500) return false;
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const cust = customers.find(c => c.id === col.customer_id);
       const matchesReceipt = col.receipt_number.toLowerCase().includes(q);
       const matchesCustomer = cust ? cust.full_name.toLowerCase().includes(q) || cust.customer_code.toLowerCase().includes(q) : false;
       const matchesRef = col.transaction_reference?.toLowerCase().includes(q) || false;
@@ -202,15 +210,13 @@ export const DashboardView: React.FC = () => {
           >
             This Month (Oct 2026)
           </button>
-          <button
-            onClick={() => setDateFilter('last_month')}
-            className={`px-3 py-1.5 rounded-lg transition ${
-              dateFilter === 'last_month' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Last Month (Sep 2026)
-          </button>
-        </div>
+            <button
+              onClick={() => setShowPendingAbove500(!showPendingAbove500)}
+              className={`px-3 py-1.5 rounded-lg transition text-xs font-semibold ${showPendingAbove500 ? 'bg-rose-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              Pending &gt; 499
+            </button>
+          </div>
       </div>
 
       {/* 1. Main Stat Cards */}

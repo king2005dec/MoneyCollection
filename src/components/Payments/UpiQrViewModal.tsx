@@ -49,13 +49,18 @@ export const UpiQrViewModal: React.FC<UpiQrViewModalProps> = ({
   };
 
   const handleConfirm = async () => {
-    if (numPay <= 0) return;
+    if (numPay <= 0) {
+      setIsSubmitting(false);
+      return;
+    }
     setIsSubmitting(true);
     try {
       if (onPaymentConfirmed) {
         await onPaymentConfirmed(numPay, utrNumber.trim());
       }
       onClose();
+    } catch (e) {
+      console.error('UPI confirm error:', e);
     } finally {
       setIsSubmitting(false);
     }
