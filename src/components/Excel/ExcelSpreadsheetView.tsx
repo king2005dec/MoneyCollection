@@ -1430,21 +1430,22 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                         </button>
 
                         {/* UPI QR Code Trigger */}
-                    <button
-                      type="button"
-              onClick={() => {
-                setUpiModalData({
-                  customerName: row.name,
-                  customerCode: row.customerCode,
-                  customerId: row.customer.id,
-                  sectionId: row.targetSectionId,
-                  currentBalance: row.currentBalance,
-                  initialAmount: row.currentBalance > 0 ? row.currentBalance : undefined,
-                });
-              }}
-              title="Open Raj UPI QR Code"
-              className="px-2 py-1 bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 rounded text-[10px] font-bold transition shadow-2xs flex items-center gap-0.5 cursor-pointer"
-            >
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setUpiModalData({
+                              customerName: row.name,
+                              customerCode: row.customerCode,
+                              customerId: row.customer.id,
+                              sectionId: row.targetSectionId,
+                              currentBalance: row.currentBalance,
+                              initialAmount: row.currentBalance > 0 ? row.currentBalance : undefined,
+                            });
+                          }}
+                          title="Open Raj UPI QR Code"
+                          className="px-2 py-1 bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 rounded text-[10px] font-bold transition shadow-2xs flex items-center gap-0.5 cursor-pointer"
+                        >
                           <QrCode className="w-3 h-3" />
                           <span>UPI</span>
                         </button>
