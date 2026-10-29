@@ -150,12 +150,19 @@ export const DashboardView: React.FC = () => {
 
     // Days filter: last N days
     if (selectedDaysFilter !== 'all' && colDate) {
-      const days = parseInt(selectedDaysFilter, 10);
-      if (!isNaN(days)) {
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - days);
-        const cutoffStr = cutoff.toISOString().slice(0, 10);
-        if (colDate < cutoffStr) return false;
+      if (selectedDaysFilter === 'today') {
+        if (colDate !== today) return false;
+      } else if (selectedDaysFilter === 'yesterday') {
+        const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+        if (colDate !== yest) return false;
+      } else {
+        const days = parseInt(selectedDaysFilter, 10);
+        if (!isNaN(days)) {
+          const cutoff = new Date();
+          cutoff.setDate(cutoff.getDate() - days);
+          const cutoffStr = cutoff.toISOString().slice(0, 10);
+          if (colDate < cutoffStr) return false;
+        }
       }
     }
     const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
@@ -340,6 +347,8 @@ export const DashboardView: React.FC = () => {
               className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-700 focus:outline-blue-500"
             >
               <option value="all">All Days</option>
+              <option value="today">Today</option>
+              <option value="yesterday">Last Day</option>
               <option value="7">Last 7 Days</option>
               <option value="30">Last 30 Days</option>
               <option value="60">Last 60 Days</option>
