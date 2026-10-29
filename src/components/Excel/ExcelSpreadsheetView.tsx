@@ -1140,13 +1140,19 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             {/* Column Headers */}
             <tr className="bg-slate-100 text-slate-800 text-[11px] font-bold uppercase tracking-wider border-b border-slate-300">
               {/* Ledger Columns */}
-              <th className="py-2 px-2.5 w-12 text-center border-r border-slate-300 bg-slate-200 sticky top-[37px]">ID</th>
-              <th className="py-2 px-3 min-w-[140px] border-r border-slate-300 bg-slate-100 sticky top-[37px]">
-                Name {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
-              </th>
-              <th className="py-2 px-3 text-right bg-[#fce8e6] text-rose-900 border-r border-slate-300 sticky top-[37px]">
-                This Month {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
-              </th>
+                    <th className="py-2 px-2.5 w-12 text-center border-r border-slate-300 bg-slate-200 sticky top-[37px]">ID</th>
+                    <th className="py-2 px-3 min-w-[140px] border-r border-slate-300 bg-slate-100 sticky top-[37px]">
+                      Name {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
+                    </th>
+                    <th className="py-2 px-3 text-right bg-[#e6f4ea] text-emerald-900 border-r border-slate-300 sticky top-[37px]">
+                      Pay (Paid)
+                    </th>
+                    <th className="py-2 px-3 text-right bg-[#e6f4ea] text-emerald-900 border-r border-slate-300 sticky top-[37px]">
+                      Pay (Paid)
+                    </th>
+                    <th className="py-2 px-3 text-right bg-[#fce8e6] text-rose-900 border-r border-slate-300 sticky top-[37px]">
+                      This Month {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
+                    </th>
               <th className="py-2 px-3 text-right bg-[#fff2cc] text-amber-900 border-r border-slate-300 sticky top-[37px]">
                 Prev Balance {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
               </th>
@@ -1261,7 +1267,17 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       )}
                     </td>
 
-                    {/* 3. This Month Bill - Editable by Owner, Read-Only for Staff */}
+                    {/* 3. Pay (Paid Amount) - Moved after Name */}
+                    <td
+                      className="py-2 px-3 text-right font-black text-emerald-800 bg-[#e6f4ea]/70 border-r border-slate-200"
+                      title="Payment recorded via Action > Update"
+                    >
+                      <div className="flex items-center justify-end">
+                        <span>{row.pay > 0 ? row.pay : 0}</span>
+                      </div>
+                    </td>
+
+                    {/* 4. This Month Bill - Editable by Owner, Read-Only for Staff */}
                     <td
                       onClick={() => {
                         handleCellClick(row.customer.id, row.targetSectionId, 'this_month', row.thisMonth, row.period?.id);
@@ -1414,21 +1430,21 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                         </button>
 
                         {/* UPI QR Code Trigger */}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setUpiModalData({
-                              customerName: row.name,
-                              customerCode: row.customerCode,
-                              customerId: row.customer.id,
-                              sectionId: row.targetSectionId,
-                              currentBalance: row.currentBalance,
-                              initialAmount: row.currentBalance > 0 ? row.currentBalance : undefined,
-                            });
-                          }}
-                          title="Open Raj UPI QR Code"
-                          className="px-2 py-1 bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 rounded text-[10px] font-bold transition shadow-2xs flex items-center gap-0.5 cursor-pointer"
-                        >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUpiModalData({
+                          customerName: row.name,
+                          customerCode: row.customerCode,
+                          customerId: row.customer.id,
+                          sectionId: row.targetSectionId,
+                          currentBalance: row.currentBalance,
+                          initialAmount: row.currentBalance > 0 ? row.currentBalance : undefined,
+                        });
+                      }}
+                      title="Open Raj UPI QR Code"
+                      className="px-2 py-1 bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 rounded text-[10px] font-bold transition shadow-2xs flex items-center gap-0.5 cursor-pointer"
+                    >
                           <QrCode className="w-3 h-3" />
                           <span>UPI</span>
                         </button>
