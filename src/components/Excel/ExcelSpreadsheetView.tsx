@@ -331,12 +331,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     currentVal: string | number,
     periodId?: string
   ) => {
-    if (!isOwner && field === 'closing_balance') {
-      showToast('Staff cannot edit current balance directly. Use Action > Update to record payment.', 'info');
-      return;
-    }
     if (!isOwner && (field === 'name' || field === 'this_month' || field === 'prev_balance' || field === 'prev_unit')) {
-      showToast('Only Owner can edit this field. Staff can edit Current Unit and record payments via Action > Update.', 'info');
+      showToast('Only Owner can edit this field. Staff can edit Current Unit, Current Balance, and record payments via Action > Update.', 'info');
       return;
     }
 
@@ -1386,20 +1382,15 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       {row.totalBalance > 0 ? row.totalBalance : 0}
                     </td>
 
-                    {/* 7. Current Balance (Pending Due) - Owner only direct edit, Staff read-only */}
+                    {/* 7. Current Balance (Pending Due) - Editable by Staff & Owner */}
                     <td
                       onClick={() => {
-                        if (!isOwner) return;
                         handleCellClick(row.customer.id, row.targetSectionId, 'closing_balance', row.currentBalance, row.period?.id);
                       }}
-                      className={`py-2 px-3 text-right font-bold border-r border-slate-200 ${
-                        isOwner
-                          ? 'cursor-pointer hover:bg-rose-100 group'
-                          : 'cursor-default opacity-70'
-                      } ${
+                      className={`py-2 px-3 text-right font-bold border-r border-slate-200 cursor-pointer hover:bg-rose-100 group ${
                         row.currentBalance > 0 ? 'text-rose-700 bg-rose-50/80' : 'text-slate-400'
                       }`}
-                      title={isOwner ? 'Click to directly update remaining balance' : 'Staff cannot edit current balance directly. Use Action > Update.'}
+                      title="Click to directly update remaining balance"
                     >
                       {editingCell?.customerId === row.customer.id && editingCell?.field === 'closing_balance' ? (
                         <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
