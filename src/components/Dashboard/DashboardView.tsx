@@ -62,6 +62,7 @@ export const DashboardView: React.FC = () => {
   const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('all');
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string>('all');
   const [selectedMethodFilter, setSelectedMethodFilter] = useState<string>('all');
+  const [selectedDaysFilter, setSelectedDaysFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showPendingAbove500, setShowPendingAbove500] = useState<boolean>(false);
 
@@ -145,6 +146,18 @@ export const DashboardView: React.FC = () => {
     if (selectedMethodFilter !== 'all' && col.payment_method !== selectedMethodFilter) return false;
 
     const today = new Date().toISOString().slice(0, 10);
+    const colDate = col.collection_date ? col.collection_date.slice(0, 10) : '';
+
+    // Days filter: last N days
+    if (selectedDaysFilter !== 'all' && colDate) {
+      const days = parseInt(selectedDaysFilter, 10);
+      if (!isNaN(days)) {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        if (colDate < cutoffStr) return false;
+      }
+    }
     const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
     if (dateFilter === 'today' && col.collection_date !== today) return false;
     if (dateFilter === 'yesterday' && col.collection_date !== yest) return false;
@@ -318,6 +331,19 @@ export const DashboardView: React.FC = () => {
               <option value="Cash">Cash</option>
               <option value="UPI">UPI</option>
               <option value="Bank Transfer">Bank Transfer</option>
+            </select>
+
+            {/* Filter Days */}
+            <select
+              value={selectedDaysFilter}
+              onChange={e => setSelectedDaysFilter(e.target.value)}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white font-medium text-slate-700 focus:outline-blue-500"
+            >
+              <option value="all">All Days</option>
+              <option value="7">Last 7 Days</option>
+              <option value="30">Last 30 Days</option>
+              <option value="60">Last 60 Days</option>
+              <option value="90">Last 90 Days</option>
             </select>
           </div>
         </div>
