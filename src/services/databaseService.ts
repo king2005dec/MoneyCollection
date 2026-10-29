@@ -326,6 +326,8 @@ export async function clearSectionData(sectionId: string, actor: { id: string; n
 
   await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS]);
 }
+
+export async function deleteEmployee(
   id: string,
   actor: { id: string; name: string }
 ): Promise<void> {
@@ -1363,28 +1365,17 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     }
   });
 
-export async function clearSectionData(sectionId: string, actor: { id: string; name: string }): Promise<void> {
-  const customers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
-  const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
-  const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
-  const toRemove = customers.filter(c => (c.assigned_section_ids || []).includes(sectionId)).map(c => c.id);
-  setStored(STORAGE_KEYS.CUSTOMERS, customers.filter(c => !toRemove.includes(c.id)));
-  setStored(STORAGE_KEYS.BILLING_PERIODS, periods.filter(p => !(p.section_id === sectionId && toRemove.includes(p.customer_id))));
-  setStored(STORAGE_KEYS.COLLECTIONS, collections.filter(c => !(c.section_id === sectionId && toRemove.includes(c.customer_id))));
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      for (const cid of toRemove) {
-        await supabase.from('billing_periods').delete().eq('customer_id', cid).eq('section_id', sectionId);
-        await supabase.from('collections').delete().eq('customer_id', cid).eq('section_id', sectionId);
-        await supabase.from('customers').delete().eq('id', cid);
-      }
-    } catch (e) {
-      console.warn('Supabase clearSectionData error:', e);
-    }
-  }
-  await addAuditLog({ actor_user_id: actor.id, actor_name: actor.name, entity_type: 'section', entity_id: sectionId, action_type: 'DELETE', reason: 'Cleared all data for section ' + sectionId });
-  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS]);
+  return {
+    totalOutstanding,
+    totalCollectionToday,
+    totalCollectionThisMonth,
+    totalCashThisMonth,
+    totalOnlineThisMonth,
+    fullyPaidCount,
+    partiallyPaidCount,
+    overdueCount,
+    pendingCount,
+  };
 }
 
 export async function bulkImportSection1(rows: any[], actor: { id: string; name: string }, month: number = 10, year: number = 2026): Promise<{ created: number }> {

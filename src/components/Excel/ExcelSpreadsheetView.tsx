@@ -359,77 +359,83 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         }
         await updateCustomer(customerId, { full_name: editValue.trim() }, actor);
         showToast(`Updated resident name to "${editValue.trim()}"`);
-      } else if (field === 'closing_balance') {
+        } else if (field === 'closing_balance') {
         // Staff or Owner updating remaining balance directly
-        const numVal = parseFloat(editValue);
-        if (isNaN(numVal) || numVal < 0) {
-          showToast('Please enter a valid positive balance.', 'error');
-          setEditingCell(null);
-          return;
+        {
+          const numVal = parseFloat(editValue);
+          if (isNaN(numVal) || numVal < 0) {
+            showToast('Please enter a valid positive balance.', 'error');
+            setEditingCell(null);
+            return;
+          }
+          await updateRemainingDueDirectly(
+            customerId,
+            sectionId,
+            selectedMonth,
+            selectedYear,
+            numVal,
+            'Balance updated directly from Ledger view',
+            actor
+          );
+          showToast(`Balance synchronized to ${formatCurrency(numVal)}!`);
         }
-        await updateRemainingDueDirectly(
-          customerId,
-          sectionId,
-          selectedMonth,
-          selectedYear,
-          numVal,
-          'Balance updated directly from Ledger view',
-          actor
-        );
-        showToast(`Balance synchronized to ${formatCurrency(numVal)}!`);
-      } else if (field === 'this_month') {
+        } else if (field === 'this_month') {
         if (!isOwner) {
           showToast('Only Owner can edit this month bill amount.', 'error');
           setEditingCell(null);
           return;
         }
-        const numVal = parseFloat(editValue);
-        if (isNaN(numVal) || numVal < 0) {
-          showToast('Please enter a valid amount.', 'error');
-          setEditingCell(null);
-          return;
-        }
-        const targetPeriod = billingPeriods.find(
-          p => p.customer_id === customerId &&
-               p.section_id === sectionId &&
-               p.billing_month === selectedMonth &&
-               p.billing_year === selectedYear
-        );
-        if (targetPeriod) {
-          await updateBillingPeriodCharges(
-            targetPeriod.id,
-            { bill_amount: numVal },
-            `Owner updated monthly bill to ${numVal}`,
-            actor
+        {
+          const numVal = parseFloat(editValue);
+          if (isNaN(numVal) || numVal < 0) {
+            showToast('Please enter a valid amount.', 'error');
+            setEditingCell(null);
+            return;
+          }
+          const targetPeriod = billingPeriods.find(
+            p => p.customer_id === customerId &&
+                 p.section_id === sectionId &&
+                 p.billing_month === selectedMonth &&
+                 p.billing_year === selectedYear
           );
-          showToast(`Updated monthly bill to ${formatCurrency(numVal)}`);
+          if (targetPeriod) {
+            await updateBillingPeriodCharges(
+              targetPeriod.id,
+              { bill_amount: numVal },
+              `Owner updated monthly bill to ${numVal}`,
+              actor
+            );
+            showToast(`Updated monthly bill to ${formatCurrency(numVal)}`);
+          }
         }
-      } else if (field === 'prev_balance') {
+        } else if (field === 'prev_balance') {
         if (!isOwner) {
           showToast('Only Owner can edit previous balance.', 'error');
           setEditingCell(null);
           return;
         }
-        const numVal = parseFloat(editValue);
-        if (isNaN(numVal) || numVal < 0) {
-          showToast('Please enter a valid amount.', 'error');
-          setEditingCell(null);
-          return;
-        }
-        const targetPeriod = billingPeriods.find(
-          p => p.customer_id === customerId &&
-               p.section_id === sectionId &&
-               p.billing_month === selectedMonth &&
-               p.billing_year === selectedYear
-        );
-        if (targetPeriod) {
-          await updateBillingPeriodCharges(
-            targetPeriod.id,
-            { opening_balance: numVal } as any,
-            `Owner updated previous balance to ${numVal}`,
-            actor
+        {
+          const numVal = parseFloat(editValue);
+          if (isNaN(numVal) || numVal < 0) {
+            showToast('Please enter a valid amount.', 'error');
+            setEditingCell(null);
+            return;
+          }
+          const targetPeriod = billingPeriods.find(
+            p => p.customer_id === customerId &&
+                 p.section_id === sectionId &&
+                 p.billing_month === selectedMonth &&
+                 p.billing_year === selectedYear
           );
-          showToast(`Updated previous balance to ${formatCurrency(numVal)}`);
+          if (targetPeriod) {
+            await updateBillingPeriodCharges(
+              targetPeriod.id,
+              { opening_balance: numVal } as any,
+              `Owner updated previous balance to ${numVal}`,
+              actor
+            );
+            showToast(`Updated previous balance to ${formatCurrency(numVal)}`);
+          }
         }
       } else if (field === 'current_unit') {
         if (!isOwner && !currentUser) {
@@ -437,76 +443,80 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           setEditingCell(null);
           return;
         }
-        const numVal = parseFloat(editValue);
-        if (isNaN(numVal) || numVal < 0) {
-          showToast('Please enter a valid meter reading.', 'error');
-          setEditingCell(null);
-          return;
-        }
-        const targetPeriod = billingPeriods.find(
-          p => p.customer_id === customerId &&
-               p.section_id === sectionId &&
-               p.billing_month === selectedMonth &&
-               p.billing_year === selectedYear
-        );
-        if (targetPeriod) {
-          const prevU = targetPeriod.previous_unit || 0;
-          const consumed = Math.max(0, numVal - prevU);
-          
-          let newBill = 0;
-          if (consumed <= 79) {
-            newBill = (consumed * 15) + 400;
-          } else {
-            newBill = consumed * 20;
+        {
+          const numVal = parseFloat(editValue);
+          if (isNaN(numVal) || numVal < 0) {
+            showToast('Please enter a valid meter reading.', 'error');
+            setEditingCell(null);
+            return;
           }
+          const targetPeriod = billingPeriods.find(
+            p => p.customer_id === customerId &&
+                 p.section_id === sectionId &&
+                 p.billing_month === selectedMonth &&
+                 p.billing_year === selectedYear
+          );
+          if (targetPeriod) {
+            const prevU = targetPeriod.previous_unit || 0;
+            const consumed = Math.max(0, numVal - prevU);
+            
+            let newBill = 0;
+            if (consumed <= 79) {
+              newBill = (consumed * 15) + 400;
+            } else {
+              newBill = consumed * 20;
+            }
 
-          await updateBillingPeriodCharges(
-            targetPeriod.id,
-            {
-              current_unit: numVal,
-              bill_amount: newBill,
-            },
-            `Updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
-            actor
-          );
-          showToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
-        } else {
-          // Create/update period if missing
-          await updateBillingPeriodCharges(
-            `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}` as any,
-            {
-              current_unit: numVal,
-            } as any,
-            `Updated meter reading to ${numVal}`,
-            actor
-          );
-          showToast(`Updated meter reading to ${numVal}!`);
+            await updateBillingPeriodCharges(
+              targetPeriod.id,
+              {
+                current_unit: numVal,
+                bill_amount: newBill,
+              },
+              `Updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
+              actor
+            );
+            showToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
+          } else {
+            // Create/update period if missing
+            await updateBillingPeriodCharges(
+              `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}` as any,
+              {
+                current_unit: numVal,
+              } as any,
+              `Updated meter reading to ${numVal}`,
+              actor
+            );
+            showToast(`Updated meter reading to ${numVal}!`);
+          }
         }
         if (!isOwner) {
           showToast('Only Owner can edit previous meter readings.', 'error');
           setEditingCell(null);
           return;
         }
-        const numVal = parseFloat(editValue);
-        if (isNaN(numVal) || numVal < 0) {
-          showToast('Please enter a valid meter reading.', 'error');
-          setEditingCell(null);
-          return;
-        }
-        const targetPeriod = billingPeriods.find(
-          p => p.customer_id === customerId &&
-               p.section_id === sectionId &&
-               p.billing_month === selectedMonth &&
-               p.billing_year === selectedYear
-        );
-        if (targetPeriod) {
-          await updateBillingPeriodCharges(
-            targetPeriod.id,
-            { previous_unit: numVal },
-            `Owner updated previous meter unit to ${numVal}`,
-            actor
+        {
+          const numVal = parseFloat(editValue);
+          if (isNaN(numVal) || numVal < 0) {
+            showToast('Please enter a valid meter reading.', 'error');
+            setEditingCell(null);
+            return;
+          }
+          const targetPeriod = billingPeriods.find(
+            p => p.customer_id === customerId &&
+                 p.section_id === sectionId &&
+                 p.billing_month === selectedMonth &&
+                 p.billing_year === selectedYear
           );
-          showToast(`Updated previous unit to ${numVal}`);
+          if (targetPeriod) {
+            await updateBillingPeriodCharges(
+              targetPeriod.id,
+              { previous_unit: numVal },
+              `Owner updated previous meter unit to ${numVal}`,
+              actor
+            );
+            showToast(`Updated previous unit to ${numVal}`);
+          }
         }
       }
 
@@ -1264,10 +1274,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
                     {/* 3. Pay (Paid Amount) - Read Only in Table, Updated via Action > Update */}
                     <td className="py-2 px-3 text-right font-black text-emerald-800 bg-[#e6f4ea]/70 border-r border-slate-200" title="Payment recorded via Action > Update">
-                      <div className="flex items-center justify-end">
-                        <span>{row.pay > 0 ? row.pay : 0}</span>
-                      </div>
-                    </td>
                       <div className="flex items-center justify-end">
                         <span>{row.pay > 0 ? row.pay : 0}</span>
                       </div>
