@@ -1130,11 +1130,11 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <th className="py-2 px-3 min-w-[140px] border-r border-slate-300 bg-slate-100 sticky top-[37px]">
                 Name {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
               </th>
-               <th className="py-2 px-3 text-right bg-[#fce8e6] text-rose-900 border-r border-slate-300 sticky top-[37px]">
-                 This Month {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
-               </th>
                <th className="py-2 px-3 text-right bg-[#e6f4ea] text-emerald-900 border-r border-slate-300 sticky top-[37px]">
                  Pay (Paid)
+               </th>
+               <th className="py-2 px-3 text-right bg-[#fce8e6] text-rose-900 border-r border-slate-300 sticky top-[37px]">
+                 This Month {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
                </th>
                <th className="py-2 px-3 text-right bg-[#fff2cc] text-amber-900 border-r border-slate-300 sticky top-[37px]">
                  Prev Balance {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
