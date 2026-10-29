@@ -72,7 +72,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       : 'sec-elec-001'
   );
 
-  const [pendingOnly, setPendingOnly] = useState<boolean>(initialPendingOnly);
+  const [pendingAbove499, setPendingAbove499] = useState<boolean>(initialPendingOnly);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<number>(10);
   const [selectedYear, setSelectedYear] = useState<number>(2026);
@@ -97,7 +97,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
   useEffect(() => {
     if (initialPendingOnly !== undefined) {
-      setPendingOnly(initialPendingOnly);
+      setPendingAbove499(initialPendingOnly);
     }
   }, [initialPendingOnly]);
 
@@ -294,7 +294,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
   // Apply filters: Search, Pending Only, & Date Range
   const filteredRows = spreadsheetRows.filter(row => {
-    if (pendingOnly && row.currentBalance <= 0) return false;
+    if (pendingAbove499 && row.currentBalance <= 499) return false;
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -885,32 +885,32 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <span className="font-extrabold text-emerald-800 text-xs">{formatCurrency(totalPay)}</span>
             </div>
 
-            {/* CLICKABLE PENDING BALANCE BOX (Toggles Pending Filter) */}
+            {/* CLICKABLE PENDING BALANCE BOX (Toggles Pending > ₹499 Filter) */}
             <button
               type="button"
-              onClick={() => setPendingOnly(!pendingOnly)}
-              title="Click here to show only Pending Customers!"
+              onClick={() => setPendingAbove499(!pendingAbove499)}
+              title="Click here to show only Pending Customers with Balance above ₹499!"
               className={`px-3 py-1.5 rounded-lg border text-left transition-all cursor-pointer relative shadow-xs ${
-                pendingOnly
+                pendingAbove499
                   ? 'bg-rose-600 text-white border-rose-700 ring-2 ring-rose-400'
                   : 'bg-rose-50 text-rose-900 border-rose-200 hover:bg-rose-100 active:scale-98'
               }`}
             >
               <div className="flex items-center gap-1.5">
-                <span className={`text-[10px] font-bold uppercase ${pendingOnly ? 'text-white' : 'text-rose-700'}`}>
-                  Pending Balance
+                <span className={`text-[10px] font-bold uppercase ${pendingAbove499 ? 'text-white' : 'text-rose-700'}`}>
+                  Pending {'>'} ₹499
                 </span>
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
-                  pendingOnly ? 'bg-white text-rose-700' : 'bg-rose-200 text-rose-900'
+                  pendingAbove499 ? 'bg-white text-rose-700' : 'bg-rose-200 text-rose-900'
                 }`}>
                   {totalPendingCustomersCount} Pending
                 </span>
               </div>
-              <span className={`font-black text-xs block ${pendingOnly ? 'text-white' : 'text-rose-700'}`}>
+              <span className={`font-black text-xs block ${pendingAbove499 ? 'text-white' : 'text-rose-700'}`}>
                 {formatCurrency(totalCurrentBalance)}
               </span>
               <span className="text-[9px] block opacity-90 underline font-semibold mt-0.5">
-                {pendingOnly ? '✓ Filter Active (Click for All)' : '👉 Click to Filter Pending'}
+                {pendingAbove499 ? '✓ Filter Active: Pending above ₹499 (Click for All)' : '👉 Click to Filter Pending > ₹499'}
               </span>
             </button>
           </div>
@@ -975,18 +975,18 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               />
             </div>
 
-            {/* Quick Toggle Button for Pending */}
+            {/* Quick Toggle Button for Pending > ₹499 */}
             <button
               type="button"
-              onClick={() => setPendingOnly(!pendingOnly)}
+              onClick={() => setPendingAbove499(!pendingAbove499)}
               className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition ${
-                pendingOnly
+                pendingAbove499
                   ? 'bg-rose-100 text-rose-800 border border-rose-300'
                   : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50'
               }`}
             >
               <Filter className="w-3.5 h-3.5" />
-              <span>{pendingOnly ? 'Pending Only' : 'Show All'}</span>
+              <span>{pendingAbove499 ? 'Pending' : 'Show All'}</span>{pendingAbove499 ? ' {>} ₹499' : ''}
             </button>
 
             {/* Export CSV Button */}
@@ -1229,7 +1229,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                         className={`inline-block px-2 py-0.5 rounded text-[11px] font-black tracking-tight shadow-2xs ${
                           row.currentBalance <= 0
                             ? 'bg-emerald-600 text-white'
-                            : 'bg-rose-600 text-white'
+                            : row.currentBalance > 499
+                            ? 'bg-rose-600 text-white'
+                            : 'bg-amber-600 text-white'
                         }`}
                         title={row.currentBalance <= 0 ? `${row.name} - Fully Paid (Settled)` : `${row.name} - Pending Balance: ₹${row.currentBalance}`}
                       >
@@ -1511,7 +1513,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                         className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-black ${
                           row.currentBalance <= 0
                             ? 'bg-emerald-600 text-white'
-                            : 'bg-rose-600 text-white'
+                            : row.currentBalance > 499
+                            ? 'bg-rose-600 text-white'
+                            : 'bg-amber-600 text-white'
                         }`}
                       >
                         {row.customerCode}
