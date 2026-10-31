@@ -1512,10 +1512,19 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   const collections = await getCollections();
   const customers = await getCustomers();
 
-  // Current month based on today's date
+  // Find the most recent billing month/year that has data
+  let currentMonth = 10;
+  let currentYear = 2026;
+  if (periods.length > 0) {
+    const sorted = [...periods].sort((a, b) => {
+      if (a.billing_year !== b.billing_year) return b.billing_year - a.billing_year;
+      return b.billing_month - a.billing_month;
+    });
+    currentMonth = sorted[0].billing_month;
+    currentYear = sorted[0].billing_year;
+  }
+
   const today = new Date();
-  const currentMonth = today.getMonth() + 1;
-  const currentYear = today.getFullYear();
   const todayStr = today.toISOString().slice(0, 10);
   const currentMonthPeriods = periods.filter(p => p.billing_month === currentMonth && p.billing_year === currentYear);
   
@@ -1631,6 +1640,15 @@ export async function bulkImportSection1(rows: any[], actor: { id: string; name:
 export async function importOctober26Data(actor: { id: string; name: string }): Promise<{ s1: number; s2: number }> {
   const flag = getStored<Boolean>('oct26_data_imported', false);
   if (flag === true) return { s1: 0, s2: 0 };
+
+  // Don't re-import if data already exists for these sections
+  const existingCustomers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
+  const hasSection1Data = existingCustomers.some(c => (c.assigned_section_ids || []).includes('sec-elec-001'));
+  const hasSection2Data = existingCustomers.some(c => (c.assigned_section_ids || []).includes('sec-water-002'));
+  if (hasSection1Data && hasSection2Data) {
+    setStored('oct26_data_imported', true);
+    return { s1: 0, s2: 0 };
+  }
 
   const S1_ID = 'sec-elec-001';
   const S2_ID = 'sec-water-002';
