@@ -428,29 +428,35 @@ export async function updateSectionName(
 // CUSTOMERS
 // -------------------------------------------------------------
 export async function getCustomers(): Promise<Customer[]> {
-  // Read from localStorage FIRST (fast, has latest local changes)
-  const loaded = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
-  
-  // In background, sync with Supabase (don't block, don't overwrite localStorage on read)
+  // Read from Supabase first (single source of truth for all devices)
   const supabase = getSupabaseClient();
   if (supabase) {
-    (async () => {
-      try {
-        const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
-        if (!error && data && data.length > 0) {
-          const localIds = new Set(loaded.map(c => c.id));
-          const supabaseOnly = data.filter((c: any) => !localIds.has(c.id));
-          if (supabaseOnly.length > 0) {
-            setStored(STORAGE_KEYS.CUSTOMERS, [...loaded, ...supabaseOnly]);
-            notifySync(STORAGE_KEYS.CUSTOMERS);
+    try {
+      const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
+      if (!error && data && data.length > 0) {
+        setStored(STORAGE_KEYS.CUSTOMERS, data);
+        // Ensure every customer has proper Section 1=A, Section 2=B, Section 3=C ID
+        return (data as Customer[]).map((c, idx) => {
+          if (c.customer_code && /^[ABC]\d+$/i.test(c.customer_code)) {
+            return c;
           }
-        }
-      } catch (e: any) {
-        console.warn('Supabase getCustomers background sync error:', e);
+          const prefix = c.assigned_section_ids?.includes('sec-water-002')
+            ? 'B'
+            : c.assigned_section_ids?.includes('sec-other-003')
+            ? 'C'
+            : 'A';
+          return {
+            ...c,
+            customer_code: `${prefix}${idx + 1}`,
+          };
+        });
       }
-    })();
+    } catch (e) {
+      console.warn('Supabase getCustomers error:', e);
+    }
   }
-  
+  const loaded = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
+  // Ensure every customer has proper Section 1=A, Section 2=B, Section 3=C ID
   return loaded.map((c, idx) => {
     if (c.customer_code && /^[ABC]\d+$/i.test(c.customer_code)) {
       return c;
@@ -631,30 +637,20 @@ export async function deleteCustomer(
 // BILLING PERIODS
 // -------------------------------------------------------------
 export async function getBillingPeriods(): Promise<BillingPeriod[]> {
-  // Read from localStorage FIRST
-  const loaded = getStored(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
-  
-  // Background sync with Supabase
+  // Read from Supabase first (single source of truth for all devices)
   const supabase = getSupabaseClient();
   if (supabase) {
-    (async () => {
-      try {
-        const { data, error } = await supabase.from('billing_periods').select('*').order('billing_year', { ascending: false }).order('billing_month', { ascending: false });
-        if (!error && data && data.length > 0) {
-          const localIds = new Set(loaded.map(p => p.id));
-          const supabaseOnly = data.filter((p: any) => !localIds.has(p.id));
-          if (supabaseOnly.length > 0) {
-            setStored(STORAGE_KEYS.BILLING_PERIODS, [...loaded, ...supabaseOnly]);
-            notifySync(STORAGE_KEYS.BILLING_PERIODS);
-          }
-        }
-      } catch (e: any) {
-        console.warn('Supabase getBillingPeriods background sync error:', e);
+    try {
+      const { data, error } = await supabase.from('billing_periods').select('*').order('billing_year', { ascending: false }).order('billing_month', { ascending: false });
+      if (!error && data && data.length > 0) {
+        setStored(STORAGE_KEYS.BILLING_PERIODS, data);
+        return data as BillingPeriod[];
       }
-    })();
+    } catch (e) {
+      console.warn('Supabase getBillingPeriods error:', e);
+    }
   }
-  
-  return loaded;
+  return getStored(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
 }
 
 export async function getBillingPeriodById(id: string): Promise<BillingPeriod | undefined> {
@@ -1010,30 +1006,20 @@ export async function carryForwardMonth(
 // COLLECTIONS / PAYMENTS
 // -------------------------------------------------------------
 export async function getCollections(): Promise<Collection[]> {
-  // Read from localStorage FIRST
-  const loaded = getStored(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
-  
-  // Background sync with Supabase
+  // Read from Supabase first (single source of truth for all devices)
   const supabase = getSupabaseClient();
   if (supabase) {
-    (async () => {
-      try {
-        const { data, error } = await supabase.from('collections').select('*').order('created_at', { ascending: false });
-        if (!error && data && data.length > 0) {
-          const localIds = new Set(loaded.map(c => c.id));
-          const supabaseOnly = data.filter((c: any) => !localIds.has(c.id));
-          if (supabaseOnly.length > 0) {
-            setStored(STORAGE_KEYS.COLLECTIONS, [...loaded, ...supabaseOnly]);
-            notifySync(STORAGE_KEYS.COLLECTIONS);
-          }
-        }
-      } catch (e: any) {
-        console.warn('Supabase getCollections background sync error:', e);
+    try {
+      const { data, error } = await supabase.from('collections').select('*').order('created_at', { ascending: false });
+      if (!error && data && data.length > 0) {
+        setStored(STORAGE_KEYS.COLLECTIONS, data);
+        return data as Collection[];
       }
-    })();
+    } catch (e) {
+      console.warn('Supabase getCollections error:', e);
+    }
   }
-  
-  return loaded;
+  return getStored(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
 }
 
 export async function addCollection(
