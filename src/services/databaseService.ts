@@ -159,7 +159,7 @@ export async function getProfiles(): Promise<Profile[]> {
   const supabase = getSupabaseClient();
   if (supabase) {
     const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
-    if (!error && data) return data;
+    if (!error && data && data.length > 0) return data;
   }
   let loaded = getStored<Profile[]>(STORAGE_KEYS.PROFILES, INITIAL_PROFILES);
   
