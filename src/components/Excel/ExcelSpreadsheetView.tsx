@@ -39,6 +39,7 @@ import {
   Check,
   AlertCircle,
   Download,
+  Clock,
 } from 'lucide-react';
 
 interface ExcelSpreadsheetViewProps {
@@ -64,6 +65,13 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   // Track last update time for display
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('');
   const markUpdated = () => setLastUpdatedAt(deviceTimeStr());
+
+  // Live device clock (updates every second)
+  const [deviceTime, setDeviceTime] = useState<string>(deviceTimeStr());
+  useEffect(() => {
+    const timer = setInterval(() => setDeviceTime(deviceTimeStr()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const showUpdateToast = (message: string) => {
     markUpdated();
@@ -279,9 +287,10 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       ? (period.bill_amount + period.additional_charges - period.credits_or_adjustments)
       : 0;
 
-    const totalBalance = period ? period.total_amount_due : (prevBalance + thisMonth);
+    // Always recalculate totals from components to avoid stale/corrupted stored values
+    const totalBalance = prevBalance + thisMonth;
     const pay = period ? period.paid_amount : 0;
-    const currentBalance = period ? Math.max(0, period.closing_balance) : Math.max(0, totalBalance - pay);
+    const currentBalance = Math.max(0, totalBalance - pay);
 
     // Meter readings
     const currentUnit = period?.current_unit ?? 0;
@@ -904,6 +913,11 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                     <X className="w-4 h-4" />
                   </button>
                 )}
+                {/* Device Date / Time */}
+                <div className="text-[9px] font-mono text-slate-500 mt-1 flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  <span id="device-time">{deviceTime}</span>
+                </div>
               </div>
             </div>
           </div>

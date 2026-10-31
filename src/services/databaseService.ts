@@ -508,8 +508,10 @@ export async function createCustomer(
   setStored(STORAGE_KEYS.CUSTOMERS, customers);
 
   // Automatically create billing periods for the current month for each assigned section
-  const currentMonth = 10;
-  const currentYear = 2026;
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+  const dueDay = 5;
   const billingPeriods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
 
   for (const sectionId of newCustomer.assigned_section_ids) {
@@ -526,7 +528,7 @@ export async function createCustomer(
       total_amount_due: 0.00,
       paid_amount: 0.00,
       closing_balance: 0.00,
-      due_date: '2026-10-05',
+      due_date: `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
       payment_status: 'Pending',
       current_unit: 0,
       previous_unit: 0,
@@ -551,6 +553,9 @@ export async function createCustomer(
     new_values: { code: customer_code, name: newCustomer.full_name, phone: newCustomer.phone },
     reason: `Registered new customer with ID ${customer_code}`,
   });
+
+  // Broadcast new customer + periods to ALL connected devices (owner + staff)
+  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
 
   return newCustomer;
 }
