@@ -159,7 +159,7 @@ export async function getProfiles(): Promise<Profile[]> {
   const supabase = getSupabaseClient();
   if (supabase) {
     const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
-    if (!error && data && data.length > 0) return data;
+    if (!error && data) return data;
   }
   let loaded = getStored<Profile[]>(STORAGE_KEYS.PROFILES, INITIAL_PROFILES);
   
@@ -380,7 +380,7 @@ export async function getSections(): Promise<CollectionSection[]> {
   const supabase = getSupabaseClient();
   if (supabase) {
     const { data, error } = await supabase.from('collection_sections').select('*').order('created_at', { ascending: true });
-    if (!error && data && data.length > 0) return data;
+    if (!error && data) return data;
   }
   const loaded = getStored(STORAGE_KEYS.SECTIONS, INITIAL_SECTIONS);
   // Ensure legacy names are normalized to Section 1, Section 2, Section 3
@@ -433,7 +433,7 @@ export async function getCustomers(): Promise<Customer[]> {
   if (supabase) {
     try {
       const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         setStored(STORAGE_KEYS.CUSTOMERS, data);
         // Ensure every customer has proper Section 1=A, Section 2=B, Section 3=C ID
         return (data as Customer[]).map((c, idx) => {
@@ -653,7 +653,7 @@ export async function getBillingPeriods(): Promise<BillingPeriod[]> {
   if (supabase) {
     try {
       const { data, error } = await supabase.from('billing_periods').select('*').order('billing_year', { ascending: false }).order('billing_month', { ascending: false });
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         setStored(STORAGE_KEYS.BILLING_PERIODS, data);
         return data as BillingPeriod[];
       }
@@ -1032,7 +1032,7 @@ export async function getCollections(): Promise<Collection[]> {
   if (supabase) {
     try {
       const { data, error } = await supabase.from('collections').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         setStored(STORAGE_KEYS.COLLECTIONS, data);
         return data as Collection[];
       }
@@ -1356,7 +1356,7 @@ export async function getAuditLogs(): Promise<AuditLog[]> {
   const supabase = getSupabaseClient();
   if (supabase) {
     const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false });
-    if (!error && data && data.length > 0) return data;
+    if (!error && data) return data;
   }
   return getStored(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
 }
