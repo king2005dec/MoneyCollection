@@ -219,6 +219,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
+  // BroadcastChannel listener for same-tab sync from notifySync()
+  useEffect(() => {
+    const bc = typeof window !== 'undefined' && 'BroadcastChannel' in window
+      ? new BroadcastChannel('money_collection_live_sync')
+      : null;
+    if (bc) {
+      const handleMessage = (e: MessageEvent) => {
+        if (e.data?.key && String(e.data.key).startsWith('col_db_')) {
+          triggerDbRefresh();
+        }
+      };
+      bc.addEventListener('message', handleMessage);
+      return () => {
+        bc.removeEventListener('message', handleMessage);
+        bc.close();
+      };
+    }
+  }, []);
+
   const openCustomerProfile = (customerId: string, fromSection?: string) => {
     setSelectedCustomerId(customerId);
     if (fromSection) setReturnSectionPage(fromSection);

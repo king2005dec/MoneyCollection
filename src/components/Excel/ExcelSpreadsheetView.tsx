@@ -511,11 +511,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           }
         }
       } else if (field === 'current_unit') {
-        if (!isOwner && !currentUser) {
-          showToast('Permission required to edit meter reading.', 'error');
-          setEditingCell(null);
-          return;
-        }
         {
           const numVal = parseFloat(editValue);
           if (isNaN(numVal) || numVal < 0) {
