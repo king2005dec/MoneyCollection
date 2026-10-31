@@ -56,14 +56,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const { isOwner, currentUser } = useAuth();
   const { dbVersion, triggerDbRefresh, showToast } = useApp();
 
-  // Device timestamp helper for update confirmations
+  // Device timestamp helper for update confirmations (stored update time, not live)
   const deviceTimeStr = () => {
-    const now = new Date();
-    return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  };
-
-  // Device date + time for header display
-  const deviceDateTimeStr = () => {
     const now = new Date();
     return now.toLocaleString([], {
       weekday: 'short',
@@ -75,16 +69,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     });
   };
 
-  // Track last update time for display
+  // Track last update time for display (when data was last updated)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('');
   const markUpdated = () => setLastUpdatedAt(deviceTimeStr());
-
-  // Live device clock (updates every second)
-  const [deviceTime, setDeviceTime] = useState<string>(deviceDateTimeStr());
-  useEffect(() => {
-    const timer = setInterval(() => setDeviceTime(deviceDateTimeStr()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   const showUpdateToast = (message: string) => {
     markUpdated();
@@ -924,10 +911,12 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                     <X className="w-4 h-4" />
                   </button>
                 )}
-                {/* Device Date / Time */}
+                {/* Last Update Time (from device) */}
                 <div className="flex items-center gap-2 px-2 py-1 bg-indigo-50 rounded-lg border border-indigo-200">
                   <Clock className="w-3 h-3 text-indigo-700" />
-                  <span className="font-mono text-xs font-bold text-indigo-700" id="device-time">{deviceTime}</span>
+                  <span className="font-mono text-xs font-bold text-indigo-700" id="device-time">
+                    {lastUpdatedAt || '—'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1738,7 +1727,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                   if (historyPeriods.length === 0) {
                                     return (
                                       <tr className="bg-white hover:bg-slate-50">
-                                        <td className="p-2 border border-slate-200 font-semibold text-indigo-600">{deviceTime}</td>
+                                        <td className="p-2 border border-slate-200 font-semibold text-indigo-600">{deviceTimeStr()}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-blue-700">{row.currentUnit}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-slate-600">{row.prevUnit}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-indigo-700">{row.unitsConsumed}</td>
@@ -1792,7 +1781,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
                                     return (
                                       <tr key={hp.id || hIdx} className="bg-white hover:bg-slate-50 border-b border-slate-100">
-                                        <td className="p-2 border border-slate-200 font-bold text-slate-800 text-[10px]">{deviceTime}</td>
+                                        <td className="p-2 border border-slate-200 font-bold text-slate-800 text-[10px]">{hp.sync_timestamp ? new Date(hp.sync_timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : deviceTimeStr()}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-blue-700">{hp.current_unit ?? 0}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-slate-600">{hp.previous_unit ?? 0}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-indigo-700">{hpUnits}</td>

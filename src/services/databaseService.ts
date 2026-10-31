@@ -54,10 +54,10 @@ const syncBroadcast = typeof window !== 'undefined' && 'BroadcastChannel' in win
   ? new BroadcastChannel('money_collection_live_sync') 
   : null;
 
-export function notifySync(key?: string) {
+export function notifySync(key?: string, data?: unknown) {
   if (syncBroadcast) {
     try {
-      syncBroadcast.postMessage({ key, timestamp: Date.now() });
+      syncBroadcast.postMessage({ key, data, timestamp: Date.now() });
     } catch (e) {
       // ignore
     }
@@ -106,7 +106,7 @@ function getDeviceInfo(): { device: string; device_info: string; timestamp: stri
 function setStored<T>(key: string, data: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(data));
-    notifySync(key);
+    notifySync(key, data);
   } catch (err) {
     console.error(`Error writing ${key} to storage:`, err);
   }

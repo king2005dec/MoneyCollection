@@ -227,6 +227,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (bc) {
       const handleMessage = (e: MessageEvent) => {
         if (e.data?.key && String(e.data.key).startsWith('col_db_')) {
+          // Write received data to our localStorage (cross-tab / same-browser sync)
+          if (e.data.data !== undefined) {
+            try {
+              localStorage.setItem(e.data.key, JSON.stringify(e.data.data));
+            } catch (err) {
+              console.warn('Failed to write synced data to localStorage:', err);
+            }
+          }
           triggerDbRefresh();
         }
       };
