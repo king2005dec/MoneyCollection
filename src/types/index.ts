@@ -75,6 +75,9 @@ export interface BillingPeriod {
   current_unit?: number;
   previous_unit?: number;
   units_consumed?: number;
+  sync_device?: string;
+  sync_device_info?: string;
+  sync_timestamp?: string;
   created_at: string;
   updated_at: string;
 }
@@ -95,6 +98,9 @@ export interface Collection {
   status: CollectionStatus;
   collection_date: string; // YYYY-MM-DD
   collection_time: string; // HH:mm:ss
+  sync_device?: string;
+  sync_device_info?: string;
+  sync_timestamp?: string;
   created_by: string;
   created_by_name?: string;
   created_at: string;

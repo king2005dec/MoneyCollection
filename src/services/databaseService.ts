@@ -89,6 +89,20 @@ async function broadcastDataSync(changedKeys: string[]): Promise<void> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DEVICE / SYNC INFO HELPER
+// Captures which device/session made each data change for audit & sync debugging.
+// ─────────────────────────────────────────────────────────────────────────────
+function getDeviceInfo(): { device: string; device_info: string; timestamp: string } {
+  const now = new Date().toISOString();
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown';
+  const platform = typeof navigator !== 'undefined' ? navigator.platform : 'unknown';
+  const lang = typeof navigator !== 'undefined' ? navigator.language : 'unknown';
+  const device = `${platform}|${lang}`;
+  const device_info = ua;
+  return { device, device_info, timestamp: now };
+}
+
 function setStored<T>(key: string, data: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(data));
@@ -643,6 +657,8 @@ export async function updateBillingPeriodCharges(
   const target = periods.find(p => p.id === id);
   if (!target) return undefined;
 
+  const { device, device_info, timestamp } = getDeviceInfo();
+
   const prevValues = {
     bill_amount: target.bill_amount,
     additional_charges: target.additional_charges,
@@ -678,6 +694,9 @@ export async function updateBillingPeriodCharges(
   }
 
   target.payment_status = computePaymentStatus(target.total_amount_due, target.paid_amount, target.due_date);
+  target.sync_device = device;
+  target.sync_device_info = device_info;
+  target.sync_timestamp = timestamp;
   target.updated_at = new Date().toISOString();
 
   setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
@@ -726,6 +745,7 @@ export async function updateRemainingDueDirectly(
          p.billing_year === year
   );
 
+  const { device, device_info, timestamp } = getDeviceInfo();
   const safeDue = Math.max(0, Number(newRemainingDue.toFixed(2)));
   const prevClosing = target ? target.closing_balance : 0;
 
@@ -744,20 +764,24 @@ export async function updateRemainingDueDirectly(
       total_amount_due: safeDue,
       paid_amount: 0,
       closing_balance: safeDue,
-      due_date: `${year}-${month.toString().padStart(2, '0')}-15`,
+      due_date: `${year}-${String(month).padStart(2, '0')}-15`,
       payment_status: safeDue === 0 ? 'Paid' : 'Pending',
+      sync_device: device,
+      sync_device_info: device_info,
+      sync_timestamp: timestamp,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
     periods.push(target);
   } else {
+    // Direct balance edit: only adjust closing_balance and total_amount_due.
+    // Do NOT recalculate bill_amount — that would corrupt the actual bill.
     target.closing_balance = safeDue;
     target.total_amount_due = Number((target.paid_amount + safeDue).toFixed(2));
-    target.bill_amount = Math.max(
-      0,
-      Number((target.total_amount_due - target.opening_balance - target.additional_charges + target.credits_or_adjustments).toFixed(2))
-    );
     target.payment_status = computePaymentStatus(target.total_amount_due, target.paid_amount, target.due_date);
+    target.sync_device = device;
+    target.sync_device_info = device_info;
+    target.sync_timestamp = timestamp;
     target.updated_at = new Date().toISOString();
   }
 
@@ -802,6 +826,7 @@ export async function updateLastMonthPaidDirectly(
          p.billing_year === prevYear
   );
 
+  const { device, device_info, timestamp } = getDeviceInfo();
   const safePaid = Math.max(0, Number(newPaidAmount.toFixed(2)));
   const prevPaid = target ? target.paid_amount : 0;
 
@@ -822,6 +847,9 @@ export async function updateLastMonthPaidDirectly(
       closing_balance: 0,
       due_date: `${prevYear}-${prevMonth.toString().padStart(2, '0')}-15`,
       payment_status: 'Paid',
+      sync_device: device,
+      sync_device_info: device_info,
+      sync_timestamp: timestamp,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -834,6 +862,9 @@ export async function updateLastMonthPaidDirectly(
     }
     target.closing_balance = Number(Math.max(0, target.total_amount_due - target.paid_amount).toFixed(2));
     target.payment_status = computePaymentStatus(target.total_amount_due, target.paid_amount, target.due_date);
+    target.sync_device = device;
+    target.sync_device_info = device_info;
+    target.sync_timestamp = timestamp;
     target.updated_at = new Date().toISOString();
   }
 
@@ -884,6 +915,8 @@ export async function carryForwardMonth(
   const dueDate = `${targetYear}-${targetMonth.toString().padStart(2, '0')}-${defaultDueDay.toString().padStart(2, '0')}`;
   const dueDay = defaultDueDay; // billing due date is 5th of month as requested
 
+  const { device, device_info, timestamp } = getDeviceInfo();
+
   for (const customer of customers) {
     if (!customer.is_active) continue;
 
@@ -922,6 +955,9 @@ export async function carryForwardMonth(
           closing_balance: openingBalance,
           due_date: `${targetYear}-${targetMonth.toString().padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
           payment_status: openingBalance > 0 ? 'Pending' : 'Paid',
+          sync_device: device,
+          sync_device_info: device_info,
+          sync_timestamp: timestamp,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });
@@ -971,12 +1007,15 @@ export async function addCollection(
   const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
   const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
 
-  // Generate unique receipt number e.g. RCP-202610-1015
+  // Generate unique receipt number based on collection date (YYYYMMDD)
+  const { device, device_info, timestamp } = getDeviceInfo();
+  const collDate = paymentData.collection_date || new Date().toISOString().slice(0, 10);
+  const dateForReceipt = collDate.replace(/-/g, '');
   const receiptNum = 1000 + collections.length + 1;
-  const receipt_number = `RCP-202610-${receiptNum}`;
+  const receipt_number = `RCP-${dateForReceipt}-${receiptNum}`;
 
   const now = new Date();
-  const dateStr = paymentData.collection_date || '2026-10-22';
+  const dateStr = collDate;
   const timeStr = paymentData.collection_time || now.toLocaleTimeString('en-US', { hour12: false });
 
   const newCollection: Collection = {
@@ -986,6 +1025,9 @@ export async function addCollection(
     status: 'Confirmed',
     collection_date: dateStr,
     collection_time: timeStr,
+    sync_device: device,
+    sync_device_info: device_info,
+    sync_timestamp: timestamp,
     created_by: actor.id,
     created_by_name: actor.name,
     created_at: new Date().toISOString(),
@@ -995,12 +1037,19 @@ export async function addCollection(
   // Update or create billing period
   let period = periods.find(p => p.id === paymentData.billing_period_id);
   if (!period) {
+    // Parse billing month/year from billing_period_id: bp-{customerId}-{sectionId}-{month}-{year}
+    const idParts = paymentData.billing_period_id.split('-');
+    const parsedMonth = idParts[idParts.length - 2];
+    const parsedYear = idParts[idParts.length - 1];
+    const bMonth = parsedMonth ? parseInt(parsedMonth, 10) : new Date().getMonth() + 1;
+    const bYear = parsedYear ? parseInt(parsedYear, 10) : new Date().getFullYear();
+    const dueDay = new Date(collDate).getDate() || 5;
     period = {
       id: paymentData.billing_period_id,
       customer_id: paymentData.customer_id,
       section_id: paymentData.section_id,
-      billing_month: 10,
-      billing_year: 2026,
+      billing_month: bMonth,
+      billing_year: bYear,
       opening_balance: 0,
       bill_amount: 0,
       additional_charges: 0,
@@ -1008,8 +1057,11 @@ export async function addCollection(
       total_amount_due: 0,
       paid_amount: 0,
       closing_balance: 0,
-      due_date: '2026-10-05',
+      due_date: `${bYear}-${String(bMonth).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
       payment_status: 'Pending',
+      sync_device: device,
+      sync_device_info: device_info,
+      sync_timestamp: timestamp,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -1022,6 +1074,9 @@ export async function addCollection(
   }
   period.closing_balance = Number(Math.max(0, period.total_amount_due - period.paid_amount).toFixed(2));
   period.payment_status = computePaymentStatus(period.total_amount_due, period.paid_amount, period.due_date);
+  period.sync_device = device;
+  period.sync_device_info = device_info;
+  period.sync_timestamp = timestamp;
   period.updated_at = new Date().toISOString();
   setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
 
@@ -1051,6 +1106,7 @@ export async function addCollection(
       amount: newCollection.amount,
       method: newCollection.payment_method,
       reference: newCollection.transaction_reference,
+      device: newCollection.sync_device,
     },
     reason: 'Recorded payment collection',
   });
