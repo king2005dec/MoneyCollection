@@ -881,6 +881,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       setNewResidentPhone('');
       setNewResidentInitialBalance('');
       setNewResidentInitialUnit('');
+      // Immediately reflect the new resident in the UI
+      setCustomers(prev => [created, ...prev]);
+      markUpdated();
       triggerDbRefresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to add resident', 'error');
@@ -1715,7 +1718,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                             <table className="w-full text-xs text-left border-collapse border border-slate-200">
                               <thead>
                                 <tr className="bg-slate-100 text-slate-800 text-[11px] font-bold uppercase">
-                                  <th className="p-2 border border-slate-200">DATE</th>
+                                  <th className="p-2 border border-slate-200">DATE / TIME</th>
                                   <th className="p-2 border border-slate-200 text-right">CURRENT</th>
                                   <th className="p-2 border border-slate-200 text-right">PREV</th>
                                   <th className="p-2 border border-slate-200 text-right">UNIT</th>
@@ -1740,7 +1743,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                   if (historyPeriods.length === 0) {
                                     return (
                                       <tr className="bg-white hover:bg-slate-50">
-                                        <td className="p-2 border border-slate-200 font-semibold">{`${selectedMonth}/1/${selectedYear}`}</td>
+                                        <td className="p-2 border border-slate-200 font-semibold text-indigo-600">{deviceTime}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-blue-700">{row.currentUnit}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-slate-600">{row.prevUnit}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-indigo-700">{row.unitsConsumed}</td>
@@ -1794,7 +1797,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
                                     return (
                                       <tr key={hp.id || hIdx} className="bg-white hover:bg-slate-50 border-b border-slate-100">
-                                        <td className="p-2 border border-slate-200 font-bold text-slate-800">{dateStr}</td>
+                                        <td className="p-2 border border-slate-200 font-bold text-slate-800 text-[10px]">{deviceTime}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-blue-700">{hp.current_unit ?? 0}</td>
                                         <td className="p-2 border border-slate-200 text-right font-bold text-slate-600">{hp.previous_unit ?? 0}</td>
                                         <td className="p-2 border border-slate-200 text-right font-extrabold text-indigo-700">{hpUnits}</td>
