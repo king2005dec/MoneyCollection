@@ -433,7 +433,7 @@ export async function getCustomers(): Promise<Customer[]> {
   if (supabase) {
     try {
       const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         setStored(STORAGE_KEYS.CUSTOMERS, data);
         // Ensure every customer has proper Section 1=A, Section 2=B, Section 3=C ID
         return (data as Customer[]).map((c, idx) => {
@@ -653,7 +653,7 @@ export async function getBillingPeriods(): Promise<BillingPeriod[]> {
   if (supabase) {
     try {
       const { data, error } = await supabase.from('billing_periods').select('*').order('billing_year', { ascending: false }).order('billing_month', { ascending: false });
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         setStored(STORAGE_KEYS.BILLING_PERIODS, data);
         return data as BillingPeriod[];
       }
@@ -1032,7 +1032,7 @@ export async function getCollections(): Promise<Collection[]> {
   if (supabase) {
     try {
       const { data, error } = await supabase.from('collections').select('*').order('created_at', { ascending: false });
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         setStored(STORAGE_KEYS.COLLECTIONS, data);
         return data as Collection[];
       }
