@@ -55,6 +55,21 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const { isOwner, currentUser } = useAuth();
   const { dbVersion, triggerDbRefresh, showToast } = useApp();
 
+  // Device timestamp helper for update confirmations
+  const deviceTimeStr = () => {
+    const now = new Date();
+    return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  // Track last update time for display
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('');
+  const markUpdated = () => setLastUpdatedAt(deviceTimeStr());
+
+  const showUpdateToast = (message: string) => {
+    markUpdated();
+    showToast(`${message} • ${deviceTimeStr()}`);
+  };
+
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [billingPeriods, setBillingPeriods] = useState<BillingPeriod[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -394,7 +409,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           return;
         }
         await updateCustomer(customerId, { full_name: editValue.trim() }, actor);
-        showToast(`Updated resident name to "${editValue.trim()}"`);
+        showUpdateToast(`Updated resident name to "${editValue.trim()}"`);
         } else if (field === 'closing_balance') {
         // Staff or Owner updating remaining balance directly
         {
@@ -413,7 +428,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             'Balance updated directly from Ledger view',
             actor
           );
-          showToast(`Balance synchronized to ${formatCurrency(numVal)}!`);
+          showUpdateToast(`Balance synchronized to ${formatCurrency(numVal)}!`);
         }
         } else if (field === 'this_month') {
         if (!isOwner) {
@@ -441,7 +456,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               `Owner updated monthly bill to ${numVal}`,
               actor
             );
-            showToast(`Updated monthly bill to ${formatCurrency(numVal)}`);
+            showUpdateToast(`Updated monthly bill to ${formatCurrency(numVal)}`);
           }
         }
         } else if (field === 'prev_balance') {
@@ -470,7 +485,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               `Owner updated previous balance to ${numVal}`,
               actor
             );
-            showToast(`Updated previous balance to ${formatCurrency(numVal)}`);
+            showUpdateToast(`Updated previous balance to ${formatCurrency(numVal)}`);
           }
         }
       } else if (field === 'current_unit') {
@@ -512,7 +527,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               `Updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
               actor
             );
-            showToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
+            showUpdateToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
           } else {
             // Create/update period if missing
             await updateBillingPeriodCharges(
@@ -523,7 +538,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               `Updated meter reading to ${numVal}`,
               actor
             );
-            showToast(`Updated meter reading to ${numVal}!`);
+            showUpdateToast(`Updated meter reading to ${numVal}!`);
           }
         }
         if (!isOwner) {
@@ -551,12 +566,13 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               `Owner updated previous meter unit to ${numVal}`,
               actor
             );
-            showToast(`Updated previous unit to ${numVal}`);
+            showUpdateToast(`Updated previous unit to ${numVal}`);
           }
         }
       }
 
       setEditingCell(null);
+      markUpdated();
       triggerDbRefresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to update cell', 'error');
@@ -620,7 +636,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         actor
       );
 
-      showToast(`Payment of ${formatCurrency(payNum)} recorded successfully for ${balanceModalCustomer.customer.full_name}! Remaining balance updated.`);
+      showUpdateToast(`Payment of ${formatCurrency(payNum)} recorded successfully for ${balanceModalCustomer.customer.full_name}! Remaining balance updated.`);
       setBalanceModalCustomer(null);
       triggerDbRefresh();
     } catch (err: any) {
@@ -655,7 +671,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         },
         actor
       );
-      showToast(`Received UPI payment of ${formatCurrency(paidAmount)} for ${upiModalData.customerName}!`);
+      showUpdateToast(`Received UPI payment of ${formatCurrency(paidAmount)} for ${upiModalData.customerName}!`);
       setUpiModalData(null);
       triggerDbRefresh();
     } catch (err: any) {
@@ -720,6 +736,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       await deleteCustomer(deleteConfirmRow.customer.id, actor);
       showToast(`Deleted resident ${deleteConfirmRow.name} (${deleteConfirmRow.customerCode}) from ledger.`);
       setDeleteConfirmRow(null);
+      markUpdated();
       triggerDbRefresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to delete resident', 'error');
@@ -764,7 +781,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       setSelectedMonth(targetNextMonth);
       setSelectedYear(targetNextYear);
       setIsNextMonthModalOpen(false);
-      showToast(`Created next month's billing cycle for ${getMonthName(targetNextMonth)} ${targetNextYear}! (${result.countCreated} records updated)`);
+      showUpdateToast(`Created next month's billing cycle for ${getMonthName(targetNextMonth)} ${targetNextYear}! (${result.countCreated} records updated)`);
       triggerDbRefresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to generate next month bill', 'error');
@@ -836,7 +853,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         );
       }
 
-      showToast(`Resident ${created.full_name} (${created.customer_code}) created successfully!`);
+      showUpdateToast(`Resident ${created.full_name} (${created.customer_code}) created successfully!`);
       setIsAddResidentOpen(false);
       setNewResidentName('');
       setNewResidentPhone('');
@@ -1078,7 +1095,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                         name: currentUser?.full_name || 'Owner',
                       };
                       const result = await carryForwardMonth(m, y, prevM, prevY, 15, actor);
-                      showToast(
+                      showUpdateToast(
                         `Auto-initialized billing cycle for ${getMonthName(m)} ${y}! Carried forward ${result.countCreated} resident records (prev balance + this month bill).`
                       );
                       triggerDbRefresh();
