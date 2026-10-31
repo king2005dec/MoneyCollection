@@ -691,6 +691,11 @@ export async function updateBillingPeriodCharges(
   if (charges.additional_charges !== undefined) target.additional_charges = charges.additional_charges;
   if (charges.credits_or_adjustments !== undefined) target.credits_or_adjustments = charges.credits_or_adjustments;
   if (charges.due_date) target.due_date = charges.due_date;
+  else {
+    const nm = target.billing_month === 12 ? 1 : target.billing_month + 1;
+    const ny = target.billing_month === 12 ? target.billing_year + 1 : target.billing_year;
+    target.due_date = `${ny}-${String(nm).padStart(2, '0')}-05`;
+  }
   if (charges.paid_amount !== undefined) target.paid_amount = charges.paid_amount;
   if (charges.current_unit !== undefined) target.current_unit = charges.current_unit;
   if (charges.previous_unit !== undefined) target.previous_unit = charges.previous_unit;
