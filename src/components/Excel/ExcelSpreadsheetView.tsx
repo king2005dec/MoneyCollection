@@ -62,14 +62,27 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
+  // Device date + time for header display
+  const deviceDateTimeStr = () => {
+    const now = new Date();
+    return now.toLocaleString([], {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  };
+
   // Track last update time for display
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('');
   const markUpdated = () => setLastUpdatedAt(deviceTimeStr());
 
   // Live device clock (updates every second)
-  const [deviceTime, setDeviceTime] = useState<string>(deviceTimeStr());
+  const [deviceTime, setDeviceTime] = useState<string>(deviceDateTimeStr());
   useEffect(() => {
-    const timer = setInterval(() => setDeviceTime(deviceTimeStr()), 1000);
+    const timer = setInterval(() => setDeviceTime(deviceDateTimeStr()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -914,9 +927,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                   </button>
                 )}
                 {/* Device Date / Time */}
-                <div className="text-[9px] font-mono text-slate-500 mt-1 flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  <span id="device-time">{deviceTime}</span>
+                <div className="flex items-center gap-2 px-2 py-1 bg-indigo-50 rounded-lg border border-indigo-200">
+                  <Clock className="w-3 h-3 text-indigo-700" />
+                  <span className="font-mono text-xs font-bold text-indigo-700" id="device-time">{deviceTime}</span>
                 </div>
               </div>
             </div>
