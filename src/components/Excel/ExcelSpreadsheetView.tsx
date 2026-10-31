@@ -814,22 +814,24 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       };
 
       const targetSecId = activeTab === 'all' ? 'sec-elec-001' : activeTab;
-      const created = await createCustomer(
-        {
-          full_name: newResidentName.trim(),
-          phone: newResidentPhone.trim() || '9876543210',
-          email: '',
-          assigned_section_ids: [targetSecId],
-          house_number: 'Flat 101',
-          building_name: '',
-          address: 'Main Society',
-          city: 'Indore',
-          is_active: true,
-          created_by: actor.id,
-          notes: 'Added by Owner from Ledger view',
-        },
-        actor
-      );
+       const created = await createCustomer(
+         {
+           full_name: newResidentName.trim(),
+           phone: newResidentPhone.trim() || '9876543210',
+           email: '',
+           assigned_section_ids: [targetSecId],
+           house_number: 'Flat 101',
+           building_name: '',
+           address: 'Main Society',
+           city: 'Indore',
+           is_active: true,
+           created_by: actor.id,
+           notes: 'Added by Owner from Ledger view',
+         },
+         actor,
+         selectedMonth,
+         selectedYear
+       );
 
       // If initial balance or unit specified, update current billing period
       const initBal = parseFloat(newResidentInitialBalance);
@@ -849,12 +851,15 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
       if (!isNaN(initUnit) && initUnit > 0) {
         const periodId = `bp-${created.id}-${targetSecId}-${selectedMonth}-${selectedYear}`;
-        await updateBillingPeriodCharges(
+        const result = await updateBillingPeriodCharges(
           periodId,
           { current_unit: initUnit },
           'Initial meter unit added by owner',
           actor
         );
+        if (!result) {
+          showToast('Warning: Could not update meter unit. Billing period not found.', 'error');
+        }
       }
 
       showUpdateToast(`Resident ${created.full_name} (${created.customer_code}) created successfully!`);

@@ -480,7 +480,9 @@ export async function getCustomerById(id: string): Promise<Customer | undefined>
 
 export async function createCustomer(
   customerData: Omit<Customer, 'id' | 'customer_code' | 'created_at' | 'updated_at'>,
-  actor: { id: string; name: string }
+  actor: { id: string; name: string },
+  billingMonth?: number,
+  billingYear?: number
 ): Promise<Customer> {
   const customers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
   
@@ -513,10 +515,10 @@ export async function createCustomer(
   customers.unshift(newCustomer);
   setStored(STORAGE_KEYS.CUSTOMERS, customers);
 
-  // Automatically create billing periods for the current month for each assigned section
+  // Automatically create billing periods for the specified month for each assigned section
   const now = new Date();
-  const currentMonth = now.getMonth() + 1;
-  const currentYear = now.getFullYear();
+  const currentMonth = billingMonth || now.getMonth() + 1;
+  const currentYear = billingYear || now.getFullYear();
   const dueDay = 5;
   const billingPeriods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
 
@@ -547,7 +549,16 @@ export async function createCustomer(
 
   const supabase = getSupabaseClient();
   if (supabase) {
-    await supabase.from('customers').insert(newCustomer);
+    try {
+      await supabase.from('customers').insert(newCustomer);
+      // Also insert billing periods
+      const newPeriods = billingPeriods.filter(p => p.customer_id === newCustomer.id);
+      if (newPeriods.length > 0) {
+        await supabase.from('billing_periods').insert(newPeriods);
+      }
+    } catch (e) {
+      console.warn('Supabase sync error in createCustomer:', e);
+    }
   }
 
   await addAuditLog({
@@ -560,7 +571,7 @@ export async function createCustomer(
     reason: `Registered new customer with ID ${customer_code}`,
   });
 
-  // Broadcast new customer + periods to ALL connected devices (owner + staff)
+  // Broadcast to all connected devices
   await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
 
   return newCustomer;
@@ -708,11 +719,12 @@ export async function updateBillingPeriodCharges(
   if (charges.closing_balance !== undefined) {
     target.closing_balance = charges.closing_balance;
     target.total_amount_due = Number((target.paid_amount + target.closing_balance).toFixed(2));
-  } else {
-    // Recalculate totals
+  } else if (charges.bill_amount !== undefined || charges.additional_charges !== undefined || charges.credits_or_adjustments !== undefined || charges.paid_amount !== undefined) {
+    // Recalculate totals only if bill-related fields changed
     target.total_amount_due = Number((target.opening_balance + target.bill_amount + target.additional_charges - target.credits_or_adjustments).toFixed(2));
     target.closing_balance = Number((target.total_amount_due - target.paid_amount).toFixed(2));
   }
+  // If only current_unit/previous_unit changed, don't touch closing_balance or total_amount_due
 
   target.payment_status = computePaymentStatus(target.total_amount_due, target.paid_amount, target.due_date);
   target.sync_device = device;
