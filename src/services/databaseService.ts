@@ -209,7 +209,7 @@ export async function createEmployee(
 
   const supabase = getSupabaseClient();
   if (supabase) {
-    await supabase.from('profiles').insert(newProfile);
+    await supabase.from('profiles').upsert(newProfile);
   }
 
   const profiles = getStored<Profile[]>(STORAGE_KEYS.PROFILES, INITIAL_PROFILES);
@@ -736,7 +736,10 @@ export async function updateBillingPeriodCharges(
 
   const supabase = getSupabaseClient();
   if (supabase) {
-    await supabase.from('billing_periods').upsert(target);
+    const { error } = await supabase.from('billing_periods').upsert(target);
+    if (error) {
+      console.error('Supabase upsert failed for billing_period:', error);
+    }
   }
 
   await addAuditLog({
@@ -822,7 +825,10 @@ export async function updateRemainingDueDirectly(
 
   const supabase = getSupabaseClient();
   if (supabase) {
-    await supabase.from('billing_periods').upsert(target);
+    const { error } = await supabase.from('billing_periods').upsert(target);
+    if (error) {
+      console.error('Supabase upsert failed for billing_period:', error);
+    }
   }
 
   await addAuditLog({
@@ -905,7 +911,10 @@ export async function updateLastMonthPaidDirectly(
 
   const supabase = getSupabaseClient();
   if (supabase) {
-    await supabase.from('billing_periods').upsert(target);
+    const { error } = await supabase.from('billing_periods').upsert(target);
+    if (error) {
+      console.error('Supabase upsert failed for billing_period:', error);
+    }
   }
 
   await addAuditLog({
