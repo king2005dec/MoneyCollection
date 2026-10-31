@@ -37,17 +37,11 @@ const STORAGE_KEYS = {
 
 // Local storage helpers with fallback to initial seed
 function getStored<T>(key: string, defaultData: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) {
-      localStorage.setItem(key, JSON.stringify(defaultData));
-      return defaultData;
-    }
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error(`Error reading ${key} from storage:`, err);
-    return defaultData;
-  }
+  return defaultData;
+}
+
+function setStored<T>(key: string, data: T): void {
+  // no-op: data lives only in Supabase
 }
 
 const syncBroadcast = typeof window !== 'undefined' && 'BroadcastChannel' in window 
@@ -101,15 +95,6 @@ function getDeviceInfo(): { device: string; device_info: string; timestamp: stri
   const device = `${platform}|${lang}`;
   const device_info = ua;
   return { device, device_info, timestamp: now };
-}
-
-function setStored<T>(key: string, data: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-    notifySync(key, data);
-  } catch (err) {
-    console.error(`Error writing ${key} to storage:`, err);
-  }
 }
 
 // Ensure database is initialized
