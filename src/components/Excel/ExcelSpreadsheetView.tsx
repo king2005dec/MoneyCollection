@@ -1176,7 +1176,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           {/* Header Banners */}
           <thead className="sticky top-0 z-20 shadow-xs">
             <tr className="bg-[#d9ead3] text-emerald-950 border-b-2 border-emerald-400">
-              <th colSpan={9} className="py-2.5 px-3 text-center text-xs sm:text-sm font-black tracking-wide uppercase border-r-2 border-emerald-500 bg-[#d9ead3] sticky top-0">
+              <th colSpan={8} className="py-2.5 px-3 text-center text-xs sm:text-sm font-black tracking-wide uppercase border-r-2 border-emerald-500 bg-[#d9ead3] sticky top-0">
                 {activeSectionName} • Collection &amp; Balances
               </th>
               <th colSpan={6} className="py-2.5 px-3 text-center text-xs sm:text-sm font-black tracking-wide uppercase bg-[#cfe2f3] text-blue-950 sticky top-0">
@@ -1206,9 +1206,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <th className="py-2 px-3 text-right bg-rose-50 text-rose-950 font-black border-r border-slate-300 sticky top-[37px]">
                 Current Balance
               </th>
-              <th className="py-2 px-2 text-center border-r border-slate-300 bg-indigo-50 sticky top-[37px]">
-                Last Sync
-              </th>
               <th className="py-2 px-2.5 text-center border-r-2 border-emerald-400 min-w-[160px] bg-slate-100 sticky top-[37px]">
                 Actions
               </th>
@@ -1230,7 +1227,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           <tbody className="divide-y divide-slate-200">
             {filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={15} className="py-12 text-center text-slate-400 font-medium text-xs">
+                <td colSpan={14} className="py-12 text-center text-slate-400 font-medium text-xs">
                   No resident records match your filter criteria.
                 </td>
               </tr>
@@ -1457,28 +1454,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       )}
                     </td>
 
-                    {/* 8. Sync Info: Device + Timestamp */}
-                    <td className="py-2 px-2 text-center border-r border-slate-200 bg-slate-50/50">
-                      <div className="flex items-center justify-center gap-1">
-                        <span
-                          className={`text-[9px] font-bold ${
-                            row.period?.sync_timestamp
-                              ? 'text-indigo-700'
-                              : 'text-slate-400'
-                          }`}
-                          title={row.period?.sync_timestamp ? `Synced: ${new Date(row.period.sync_timestamp).toLocaleString()} • Device: ${row.period?.sync_device || 'unknown'}` : 'No sync data'}
-                        >
-                          {row.period?.sync_timestamp
-                            ? new Date(row.period.sync_timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                            : '—'}
-                        </span>
-                        {row.period?.sync_device && (
-                          <span className="text-[9px] text-slate-500 font-mono">{row.period.sync_device.split('|')[0]}</span>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* 9. Actions Column: Update, UPI QR, Invoice, and Delete (Owner) */}
+                    {/* 8. Actions Column: Update, UPI QR, Invoice, and Delete (Owner) */}
                     <td className="py-2 px-2 text-center border-r-2 border-emerald-400">
                       <div className="flex items-center justify-center gap-1">
                         {/* Fast Balance Update Modal */}
@@ -1675,7 +1651,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                   {/* Expanded Detail Sub-Table Row */}
                   {expandedCustomerIds[row.customer.id] && (
                     <tr className="bg-slate-50 border-b border-slate-300">
-                      <td colSpan={15} className="p-3">
+                      <td colSpan={14} className="p-3">
                         <div className="bg-white rounded-xl border border-slate-300 p-3 shadow-sm">
                           <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-200">
                             <div className="flex items-center gap-2">
@@ -1705,7 +1681,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                   <th className="p-2 border border-slate-200 text-right bg-emerald-50 text-emerald-900">PAY</th>
                                   <th className="p-2 border border-slate-200 text-center">PAYMENT TYPE</th>
                                   <th className="p-2 border border-slate-200 text-right">CURRENT BALANCE</th>
-                                  <th className="p-2 border border-slate-200 text-center text-[9px]">SYNCED</th>
                                   <th className="p-2 border border-slate-200 text-center w-24">INVOICE</th>
                                 </tr>
                               </thead>
@@ -1733,9 +1708,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                           {getPaymentType(row.customer.id, selectedMonth, selectedYear)}
                                         </td>
                                         <td className="p-2 border border-slate-200 text-right font-black text-rose-800">{formatCurrency(row.currentBalance)}</td>
-                                        <td className="p-2 border border-slate-200 text-center text-[9px]">
-                                          <span className="font-bold text-slate-400">—</span>
-                                        </td>
                                         <td className="p-2 border border-slate-200 text-center">
                                           <button
                                             type="button"
@@ -1790,16 +1762,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                           {getPaymentType(row.customer.id, hp.billing_month, hp.billing_year)}
                                         </td>
                                         <td className="p-2 border border-slate-200 text-right font-black text-rose-800">{formatCurrency(Math.max(0, hp.closing_balance))}</td>
-                                        <td className="p-2 border border-slate-200 text-center text-[9px]">
-                                          <span
-                                            className={`font-bold ${
-                                              hp.sync_timestamp ? 'text-indigo-700' : 'text-slate-400'
-                                            }`}
-                                            title={hp.sync_timestamp ? `Synced: ${new Date(hp.sync_timestamp).toLocaleString()} • ${hp.sync_device || 'unknown'}` : 'No sync data'}
-                                          >
-                                            {hp.sync_timestamp ? new Date(hp.sync_timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
-                                          </span>
-                                        </td>
                                         <td className="p-2 border border-slate-200 text-center">
                                           <button
                                             type="button"
