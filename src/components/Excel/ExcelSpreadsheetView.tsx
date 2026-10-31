@@ -522,7 +522,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               newBill = consumed * 20;
             }
 
-            await updateBillingPeriodCharges(
+            const result = await updateBillingPeriodCharges(
               targetPeriod.id,
               {
                 current_unit: numVal,
@@ -531,14 +531,26 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               `Updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
               actor
             );
-            showUpdateToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
+            if (result) {
+              showUpdateToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
+            } else {
+              showToast('Failed to update meter reading. Please try again.', 'error');
+            }
           } else {
             // Create/update period if missing
+            await updateRemainingDueDirectly(
+              customerId,
+              sectionId,
+              selectedMonth,
+              selectedYear,
+              0,
+              'Initial billing period created',
+              actor
+            );
+            const periodId = `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
             await updateBillingPeriodCharges(
-              `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}` as any,
-              {
-                current_unit: numVal,
-              } as any,
+              periodId,
+              { current_unit: numVal },
               `Updated meter reading to ${numVal}`,
               actor
             );
