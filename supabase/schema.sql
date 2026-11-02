@@ -2,6 +2,7 @@
 -- MONEY COLLECTION & MONTHLY BILLING MANAGEMENT SYSTEM
 -- SUPABASE POSTGRESQL SCHEMA WITH TEXT PRIMARY KEYS & REALTIME REPLICATION
 -- Timezone: Asia/Kolkata | Currency: INR (₹)
+-- RUN THIS ENTIRE FILE IN: Supabase Dashboard → SQL Editor → New Query → Run
 -- ==============================================================================
 
 -- 1. DROP EXISTING CONFLICTING TABLES IF RE-INITIALIZING
@@ -32,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('Asia/Kolkata', now())
 );
 
--- 3. COLLECTION SECTIONS TABLE (Section 1 = Electricity, Section 2 = Water, Section 3 = Other)
+-- 3. COLLECTION SECTIONS TABLE
 CREATE TABLE IF NOT EXISTS public.collection_sections (
     id TEXT PRIMARY KEY,
     code TEXT UNIQUE NOT NULL,
@@ -45,7 +46,7 @@ CREATE TABLE IF NOT EXISTS public.collection_sections (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('Asia/Kolkata', now())
 );
 
--- 4. CUSTOMERS TABLE (Residents / Accounts)
+-- 4. CUSTOMERS TABLE
 CREATE TABLE IF NOT EXISTS public.customers (
     id TEXT PRIMARY KEY,
     customer_code TEXT UNIQUE NOT NULL,
@@ -69,7 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_customers_code ON public.customers(customer_code)
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON public.customers(phone);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON public.customers(full_name);
 
--- 5. BILLING PERIODS TABLE (Monthly ledger per customer per section)
+-- 5. BILLING PERIODS TABLE
 CREATE TABLE IF NOT EXISTS public.billing_periods (
     id TEXT PRIMARY KEY,
     customer_id TEXT NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
@@ -121,7 +122,22 @@ CREATE TABLE IF NOT EXISTS public.collections (
 CREATE INDEX IF NOT EXISTS idx_collections_date ON public.collections(collection_date);
 CREATE INDEX IF NOT EXISTS idx_collections_customer ON public.collections(customer_id);
 
--- 7. AUDIT LOGS TABLE
+-- 7. COLLECTION REVERSALS TABLE
+CREATE TABLE IF NOT EXISTS public.collection_reversals (
+    id TEXT PRIMARY KEY,
+    original_collection_id TEXT NOT NULL REFERENCES public.collections(id) ON DELETE CASCADE,
+    customer_id TEXT NOT NULL REFERENCES public.customers(id) ON DELETE RESTRICT,
+    section_id TEXT NOT NULL REFERENCES public.collection_sections(id) ON DELETE RESTRICT,
+    billing_period_id TEXT NOT NULL REFERENCES public.billing_periods(id) ON DELETE CASCADE,
+    reversal_amount NUMERIC(12, 2) NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    reversed_by TEXT REFERENCES public.profiles(id) ON DELETE SET NULL,
+    reversed_by_name TEXT DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('Asia/Kolkata', now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('Asia/Kolkata', now())
+);
+
+-- 8. AUDIT LOGS TABLE
 CREATE TABLE IF NOT EXISTS public.audit_logs (
     id TEXT PRIMARY KEY,
     actor_user_id TEXT,
@@ -135,7 +151,10 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('Asia/Kolkata', now())
 );
 
--- 8. SYSTEM SETTINGS TABLE
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON public.audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON public.audit_logs(actor_user_id);
+
+-- 9. SYSTEM SETTINGS TABLE
 CREATE TABLE IF NOT EXISTS public.system_settings (
     key TEXT PRIMARY KEY,
     value JSONB NOT NULL,
@@ -144,7 +163,8 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
 );
 
 -- ==============================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES - OPEN FOR CLIENT APPLICATION ACCESS
+-- ROW LEVEL SECURITY (RLS) POLICIES — OPEN FOR CLIENT APPLICATION ACCESS
+-- (Using publishable/anon key from front-end)
 -- ==============================================================================
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -152,66 +172,61 @@ ALTER TABLE public.collection_sections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.billing_periods ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.collections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.collection_reversals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public full access on profiles" ON public.profiles FOR ALL TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public full access on sections" ON public.collection_sections FOR ALL TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public full access on customers" ON public.customers FOR ALL TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public full access on billing_periods" ON public.billing_periods FOR ALL TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public full access on collections" ON public.collections FOR ALL TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public full access on audit_logs" ON public.audit_logs FOR ALL TO public USING (true) WITH CHECK (true);
-CREATE POLICY "Allow public full access on system_settings" ON public.system_settings FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public full access on profiles"           ON public.profiles           FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public full access on sections"           ON public.collection_sections FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public full access on customers"          ON public.customers           FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public full access on billing_periods"    ON public.billing_periods     FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public full access on collections"        ON public.collections         FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public full access on reversals"          ON public.collection_reversals FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public full access on audit_logs"         ON public.audit_logs          FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public full access on system_settings"    ON public.system_settings     FOR ALL TO public USING (true) WITH CHECK (true);
 
 -- ==============================================================================
--- ENABLE REALTIME REPLICATION FOR LIVE 4-USER SYNCHRONIZATION
+-- ENABLE REALTIME REPLICATION FOR LIVE 4-DEVICE SYNCHRONIZATION
+-- (All tables needed for cross-device sync)
 -- ==============================================================================
 
 DO $$
 BEGIN
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE profiles;
-  EXCEPTION WHEN OTHERS THEN NULL; END;
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE collection_sections;
-  EXCEPTION WHEN OTHERS THEN NULL; END;
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE customers;
-  EXCEPTION WHEN OTHERS THEN NULL; END;
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE billing_periods;
-  EXCEPTION WHEN OTHERS THEN NULL; END;
-  BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE collections;
-  EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE profiles;           EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE collection_sections; EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE customers;           EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE billing_periods;     EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE collections;         EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE collection_reversals;EXCEPTION WHEN OTHERS THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE audit_logs;          EXCEPTION WHEN OTHERS THEN NULL; END;
 END $$;
 
 -- ==============================================================================
--- INITIAL SEED DATA INSERTION
+-- INITIAL SEED DATA
 -- ==============================================================================
 
--- 1. Profiles (Owner is Raj only)
+-- Profiles (Owner = Raj)
 INSERT INTO public.profiles (id, full_name, email, phone, role, is_active, assigned_sections, username, password)
-VALUES 
-  ('usr-owner-001', 'Raj', 'owner@collectionpro.in', '+91 98260 11001', 'owner', true, ARRAY['Section 1', 'Section 2', 'Section 3'], 'rxjhaldar', 'raj25520035'),
-  ('usr-admin-001', 'Abhishek', 'abhishek@collectionpro.in', '+91 98261 22002', 'collection_admin', true, ARRAY['Section 1', 'Section 2'], 'Abhishek1218', 'abhishek@1218'),
-  ('usr-admin-002', 'Bablu Raut', 'bablu@collectionpro.in', '+91 98262 33003', 'collection_admin', true, ARRAY['Section 2', 'Section 3'], 'Babluraut', 'bablu18'),
-  ('usr-admin-003', 'Seema Haldar', 'seema@collectionpro.in', '+91 98263 44004', 'collection_admin', true, ARRAY['Section 1', 'Section 2', 'Section 3'], 'seemahaldar', 'seema2026')
-ON CONFLICT (id) DO UPDATE SET 
+VALUES
+  ('usr-owner-001', 'Raj',          'owner@collectionpro.in',    '+91 98260 11001', 'owner',              true, ARRAY['Section 1','Section 2','Section 3'], 'rxjhaldar',   'raj25520035'),
+  ('usr-admin-001', 'Abhishek',     'abhishek@collectionpro.in', '+91 98261 22002', 'collection_admin',   true, ARRAY['Section 1','Section 2'],             'Abhishek1218','abhishek@1218'),
+  ('usr-admin-002', 'Bablu Raut',   'bablu@collectionpro.in',    '+91 98262 33003', 'collection_admin',   true, ARRAY['Section 2','Section 3'],             'Babluraut',   'bablu18'),
+  ('usr-admin-003', 'Seema Haldar', 'seema@collectionpro.in',    '+91 98263 44004', 'collection_admin',   true, ARRAY['Section 1','Section 2','Section 3'], 'seemahaldar', 'seema2026')
+ON CONFLICT (id) DO UPDATE SET
   full_name = EXCLUDED.full_name,
-  username = EXCLUDED.username,
-  password = EXCLUDED.password;
+  username  = EXCLUDED.username,
+  password  = EXCLUDED.password;
 
--- 2. Sections
+-- Sections
 INSERT INTO public.collection_sections (id, code, name, description, icon, color, is_active)
-VALUES 
-  ('sec-elec-001', 'electricity', 'Section 1', 'Section 1 Electricity & Utility Meter Collections', 'Zap', 'amber', true),
-  ('sec-water-002', 'water', 'Section 2', 'Section 2 Monthly Water Supply & Pipeline Dues', 'Droplets', 'blue', true),
-  ('sec-other-003', 'other', 'Section 3', 'Section 3 Maintenance & Miscellaneous Charges', 'Layers', 'emerald', true)
+VALUES
+  ('sec-elec-001',  'electricity', 'Section 1', 'Section 1 Electricity & Utility Meter Collections', 'Zap',      'amber',   true),
+  ('sec-water-002', 'water',       'Section 2', 'Section 2 Monthly Water Supply & Pipeline Dues',    'Droplets', 'blue',    true),
+  ('sec-other-003', 'other',       'Section 3', 'Section 3 Maintenance & Miscellaneous Charges',     'Layers',   'emerald', true)
 ON CONFLICT (id) DO NOTHING;
 
--- 3. Initial Settings
+-- System Settings
 INSERT INTO public.system_settings (key, value)
-VALUES 
-  ('general', '{"business_name": "Raj Utility Billing & Collection", "business_phone": "+91 98260 11001", "currency": "INR", "currency_symbol": "₹"}')
+VALUES
+  ('general', '{"business_name":"Raj Utility Billing & Collection","business_phone":"+91 98260 11001","currency":"INR","currency_symbol":"₹"}')
 ON CONFLICT (key) DO NOTHING;

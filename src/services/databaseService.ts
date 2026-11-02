@@ -59,8 +59,7 @@ export function notifySync(key?: string, data?: unknown) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Supabase Broadcast sync – pushes actual data payloads to all connected devices
-// AppContext will register a sender function here after connecting
+// Supabase Broadcast sync – delegates to syncService (instant broadcast + Supabase DB upsert)
 // ─────────────────────────────────────────────────────────────────────────────
 type BroadcastSendFn = (key: string, data: unknown) => Promise<void>;
 let _broadcastSender: BroadcastSendFn | null = null;
@@ -70,6 +69,14 @@ export function setBroadcastSender(fn: BroadcastSendFn | null): void {
 }
 
 async function broadcastDataSync(changedKeys: string[]): Promise<void> {
+  // Primary path: syncService handles broadcast + Supabase DB upsert
+  try {
+    const { syncAfterWrite } = await import('./syncService');
+    await syncAfterWrite(changedKeys);
+    return;
+  } catch { /* fall through to legacy */ }
+
+  // Legacy fallback via AppContext-registered sender
   if (!_broadcastSender) return;
   for (const key of changedKeys) {
     try {
