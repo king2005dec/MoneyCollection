@@ -79,7 +79,27 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   };
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [billingPeriods, setBillingPeriods] = useState<BillingPeriod[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [sections, setSections] = useState<CollectionSection[]>([]);
   const [ledgerHistory, setLedgerHistory] = useState<LedgerHistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // View state: Section tabs
+  const [activeTab, setActiveTab] = useState<'sec-elec-001' | 'sec-water-002' | 'sec-other-003' | 'all'>(
+    initialSectionCode === 'water'
+      ? 'sec-water-002'
+      : initialSectionCode === 'other'
+      ? 'sec-other-003'
+      : initialSectionCode === 'all'
+      ? 'all'
+      : 'sec-elec-001'
+  );
+
+  const [pendingAbove499, setPendingAbove499] = useState<boolean>(initialPendingOnly);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedMonth, setSelectedMonth] = useState<number>(10);
+  const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [currentTimeTicker, setCurrentTimeTicker] = useState<number>(Date.now());
 
   useEffect(() => {
@@ -107,26 +127,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       remainingDays,
     };
   }, [selectedMonth, selectedYear, currentTimeTicker]);
-  const [billingPeriods, setBillingPeriods] = useState<BillingPeriod[]>([]);
-  const [collections, setCollections] = useState<Collection[]>([]);
-  const [sections, setSections] = useState<CollectionSection[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // View state: Section tabs
-  const [activeTab, setActiveTab] = useState<'sec-elec-001' | 'sec-water-002' | 'sec-other-003' | 'all'>(
-    initialSectionCode === 'water'
-      ? 'sec-water-002'
-      : initialSectionCode === 'other'
-      ? 'sec-other-003'
-      : initialSectionCode === 'all'
-      ? 'all'
-      : 'sec-elec-001'
-  );
-
-  const [pendingAbove499, setPendingAbove499] = useState<boolean>(initialPendingOnly);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedMonth, setSelectedMonth] = useState<number>(10);
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
 
   // Delete Resident Modal state (replaces native window.confirm)
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<any | null>(null);
