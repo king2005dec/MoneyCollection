@@ -135,38 +135,24 @@ export async function seedSupabaseIfEmpty(): Promise<boolean> {
 // PROFILES / EMPLOYEES
 // -------------------------------------------------------------
 export async function getProfiles(): Promise<Profile[]> {
+  const local = getStored<Profile[]>(STORAGE_KEYS.PROFILES, INITIAL_PROFILES);
   const supabase = getSupabaseClient();
   if (supabase) {
-    const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
-    if (!error && data && data.length > 0) return data;
-  }
-  let loaded = getStored<Profile[]>(STORAGE_KEYS.PROFILES, INITIAL_PROFILES);
-  
-  // Ensure all INITIAL_PROFILES (with correct usernames & passwords) are present and up to date
-  let updated = false;
-  INITIAL_PROFILES.forEach(initP => {
-    const existingIndex = loaded.findIndex(p => p.id === initP.id || (p.username && initP.username && p.username.toLowerCase() === initP.username.toLowerCase()));
-    if (existingIndex >= 0) {
-      if (loaded[existingIndex].password !== initP.password || loaded[existingIndex].username !== initP.username || loaded[existingIndex].full_name !== initP.full_name) {
-        loaded[existingIndex] = { ...loaded[existingIndex], username: initP.username, password: initP.password, role: initP.role, full_name: initP.full_name };
-        updated = true;
+    try {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', STORAGE_KEYS.PROFILES)
+        .maybeSingle();
+      if (!error && data?.value && Array.isArray(data.value) && data.value.length > 0) {
+        setStored(STORAGE_KEYS.PROFILES, data.value);
+        return data.value as Profile[];
       }
-    } else {
-      loaded.push(initP);
-      updated = true;
+    } catch (e) {
+      console.warn('Supabase getProfiles error:', e);
     }
-  });
-
-  if (updated) {
-    setStored(STORAGE_KEYS.PROFILES, loaded);
   }
-
-  return loaded.map(p => ({
-    ...p,
-    assigned_sections: p.assigned_sections && p.assigned_sections.length > 0
-      ? p.assigned_sections
-      : (p.role === 'owner' ? ['Section 1', 'Section 2', 'Section 3'] : ['Section 1', 'Section 2']),
-  }));
+  return local;
 }
 
 export async function getProfileById(id: string): Promise<Profile | undefined> {
@@ -356,20 +342,24 @@ export async function deleteEmployee(
 // SECTIONS
 // -------------------------------------------------------------
 export async function getSections(): Promise<CollectionSection[]> {
+  const local = getStored<CollectionSection[]>(STORAGE_KEYS.SECTIONS, INITIAL_SECTIONS);
   const supabase = getSupabaseClient();
   if (supabase) {
-    const { data, error } = await supabase.from('collection_sections').select('*').order('created_at', { ascending: true });
-    if (!error && data) return data;
+    try {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', STORAGE_KEYS.SECTIONS)
+        .maybeSingle();
+      if (!error && data?.value && Array.isArray(data.value) && data.value.length > 0) {
+        setStored(STORAGE_KEYS.SECTIONS, data.value);
+        return data.value as CollectionSection[];
+      }
+    } catch (e) {
+      console.warn('Supabase getSections error:', e);
+    }
   }
-  const loaded = getStored(STORAGE_KEYS.SECTIONS, INITIAL_SECTIONS);
-  // Ensure legacy names are normalized to Section 1, Section 2, Section 3
-  const normalized = loaded.map(s => {
-    if (s.code === 'electricity') return { ...s, name: 'Section 1' };
-    if (s.code === 'water') return { ...s, name: 'Section 2' };
-    if (s.code === 'other') return { ...s, name: 'Section 3' };
-    return s;
-  });
-  return normalized;
+  return local;
 }
 
 export async function updateSectionName(
@@ -602,20 +592,24 @@ export async function deleteCustomer(
 // BILLING PERIODS
 // -------------------------------------------------------------
 export async function getBillingPeriods(): Promise<BillingPeriod[]> {
-  // Read from Supabase first (single source of truth for all devices)
+  const local = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('billing_periods').select('*').order('billing_year', { ascending: false }).order('billing_month', { ascending: false });
-      if (!error && data && data.length > 0) {
-        setStored(STORAGE_KEYS.BILLING_PERIODS, data);
-        return data as BillingPeriod[];
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', STORAGE_KEYS.BILLING_PERIODS)
+        .maybeSingle();
+      if (!error && data?.value && Array.isArray(data.value) && data.value.length > 0) {
+        setStored(STORAGE_KEYS.BILLING_PERIODS, data.value);
+        return data.value as BillingPeriod[];
       }
     } catch (e) {
       console.warn('Supabase getBillingPeriods error:', e);
     }
   }
-  return getStored(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
+  return local;
 }
 
 export async function getBillingPeriodById(id: string): Promise<BillingPeriod | undefined> {
@@ -986,20 +980,24 @@ export async function carryForwardMonth(
 // COLLECTIONS / PAYMENTS
 // -------------------------------------------------------------
 export async function getCollections(): Promise<Collection[]> {
-  // Read from Supabase first (single source of truth for all devices)
+  const local = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('collections').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
-        setStored(STORAGE_KEYS.COLLECTIONS, data);
-        return data as Collection[];
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', STORAGE_KEYS.COLLECTIONS)
+        .maybeSingle();
+      if (!error && data?.value && Array.isArray(data.value) && data.value.length > 0) {
+        setStored(STORAGE_KEYS.COLLECTIONS, data.value);
+        return data.value as Collection[];
       }
     } catch (e) {
       console.warn('Supabase getCollections error:', e);
     }
   }
-  return getStored(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+  return local;
 }
 
 export async function addCollection(

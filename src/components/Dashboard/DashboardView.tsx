@@ -110,16 +110,9 @@ export const DashboardView: React.FC = () => {
     if (supabase) {
       try {
         channel = supabase
-          .channel('money_collection_dashboard_sync')
-          .on('broadcast', { event: 'data_sync' }, (payload: any) => {
-            const key = payload?.payload?.key;
-            if (!key) {
-              loadData();
-              return;
-            }
-            if (key.includes('collections') || key.includes('billing') || key.includes('customers') || key.includes('audit')) {
-              loadData();
-            }
+          .channel('raj_collection_sync_v3')
+          .on('broadcast', { event: 'data_changed' }, () => {
+            loadData();
           })
           .subscribe();
       } catch (e) {

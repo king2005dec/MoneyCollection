@@ -287,10 +287,14 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       ? (period.bill_amount + period.additional_charges - period.credits_or_adjustments)
       : 0;
 
-    // Always recalculate totals from components to avoid stale/corrupted stored values
-    const totalBalance = prevBalance + thisMonth;
+    // Use period actual total_amount_due and closing_balance so live updates reflect immediately
     const pay = period ? period.paid_amount : 0;
-    const currentBalance = Math.max(0, totalBalance - pay);
+    const totalBalance = period && period.total_amount_due !== undefined
+      ? period.total_amount_due
+      : (prevBalance + thisMonth);
+    const currentBalance = period && period.closing_balance !== undefined
+      ? Math.max(0, period.closing_balance)
+      : Math.max(0, totalBalance - pay);
 
     // Meter readings
     const currentUnit = period?.current_unit ?? 0;
