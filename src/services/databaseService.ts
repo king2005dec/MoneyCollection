@@ -514,20 +514,6 @@ export async function createCustomer(
   }
   setStored(STORAGE_KEYS.BILLING_PERIODS, billingPeriods);
 
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      await supabase.from('customers').insert(newCustomer);
-      // Also insert billing periods
-      const newPeriods = billingPeriods.filter(p => p.customer_id === newCustomer.id);
-      if (newPeriods.length > 0) {
-        await supabase.from('billing_periods').insert(newPeriods);
-      }
-    } catch (e) {
-      console.warn('Supabase sync error in createCustomer:', e);
-    }
-  }
-
   await addAuditLog({
     actor_user_id: actor.id,
     actor_name: actor.name,

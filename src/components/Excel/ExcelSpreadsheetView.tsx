@@ -142,7 +142,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const [editingCell, setEditingCell] = useState<{
     customerId: string;
     sectionId: string;
-    field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit';
+    field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit' | 'pay';
     periodId?: string;
   } | null>(null);
 
@@ -192,8 +192,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const [isAddResidentOpen, setIsAddResidentOpen] = useState<boolean>(false);
   const [newResidentName, setNewResidentName] = useState<string>('');
   const [newResidentPhone, setNewResidentPhone] = useState<string>('');
+  const [newResidentCurrentUnit, setNewResidentCurrentUnit] = useState<string>('');
+  const [newResidentPrevUnit, setNewResidentPrevUnit] = useState<string>('');
   const [newResidentInitialBalance, setNewResidentInitialBalance] = useState<string>('');
-  const [newResidentInitialUnit, setNewResidentInitialUnit] = useState<string>('');
   const [savingNewResident, setSavingNewResident] = useState<boolean>(false);
 
   useEffect(() => {
@@ -375,7 +376,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const handleCellClick = (
     customerId: string,
     sectionId: string,
-    field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit',
+    field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit' | 'pay',
     currentVal: string | number,
     periodId?: string
   ) => {
@@ -383,7 +384,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       showToast('Owner only: Direct balance edit is disabled. Staff use Action > Update.', 'info');
       return;
     }
-    if (!isOwner && (field === 'name' || field === 'this_month' || field === 'prev_balance' || field === 'prev_unit')) {
+    if (!isOwner && (field === 'pay' || field === 'name' || field === 'this_month' || field === 'prev_balance' || field === 'prev_unit')) {
       showToast('Only Owner can edit this field. Staff can edit Current Unit and record payments via Action > Update.', 'info');
       return;
     }
@@ -401,7 +402,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const handleCellSave = async (
     customerId: string,
     sectionId: string,
-    field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit'
+    field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit' | 'pay'
   ) => {
     const actor = {
       id: currentUser?.id || (isOwner ? 'usr-owner-001' : 'usr-staff-001'),
@@ -423,6 +424,37 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         }
         await updateCustomer(customerId, { full_name: editValue.trim() }, actor);
         showUpdateToast(`Updated resident name to "${editValue.trim()}"`);
+        } else if (field === 'pay') {
+        if (!isOwner) {
+          showToast('Only Owner can edit paid amount directly.', 'error');
+          setEditingCell(null);
+          return;
+        }
+        {
+          const payVal = parseFloat(editValue);
+          if (isNaN(payVal) || payVal < 0) {
+            showToast('Please enter a valid pay amount.', 'error');
+            setEditingCell(null);
+            return;
+          }
+          const periodId = `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
+          await addCollection(
+            {
+              customer_id: customerId,
+              section_id: sectionId,
+              billing_period_id: periodId,
+              amount: payVal,
+              payment_method: 'Cash',
+              notes: 'Payment directly entered by Owner in spreadsheet',
+              collection_date: new Date().toISOString().slice(0, 10),
+              collection_time: new Date().toTimeString().slice(0, 8),
+              created_by: actor.id,
+              created_by_name: actor.name,
+            },
+            actor
+          );
+          showUpdateToast(`Recorded payment of ${formatCurrency(payVal)}!`);
+        }
         } else if (field === 'closing_balance') {
         // Staff or Owner updating remaining balance directly
         {
@@ -831,62 +863,72 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       };
 
       const targetSecId = activeTab === 'all' ? 'sec-elec-001' : activeTab;
-       const created = await createCustomer(
-         {
-           full_name: newResidentName.trim(),
-           phone: newResidentPhone.trim() || '9876543210',
-           email: '',
-           assigned_section_ids: [targetSecId],
-           house_number: 'Flat 101',
-           building_name: '',
-           address: 'Main Society',
-           city: 'Indore',
-           is_active: true,
-           created_by: actor.id,
-           notes: 'Added by Owner from Ledger view',
-         },
-         actor,
-         selectedMonth,
-         selectedYear
-       );
+      const created = await createCustomer(
+        {
+          full_name: newResidentName.trim(),
+          phone: newResidentPhone.trim() || '',
+          email: '',
+          assigned_section_ids: [targetSecId],
+          house_number: '',
+          building_name: '',
+          address: 'Indore',
+          city: 'Indore',
+          is_active: true,
+          created_by: actor.id,
+          notes: 'Added by Owner from Ledger view',
+        },
+        actor,
+        selectedMonth,
+        selectedYear
+      );
 
-      // If initial balance or unit specified, update current billing period
+      const curU = parseFloat(newResidentCurrentUnit);
+      const prevU = parseFloat(newResidentPrevUnit);
       const initBal = parseFloat(newResidentInitialBalance);
-      const initUnit = parseFloat(newResidentInitialUnit);
 
-      if (!isNaN(initBal) && initBal > 0) {
-        await updateRemainingDueDirectly(
-          created.id,
-          targetSecId,
-          selectedMonth,
-          selectedYear,
-          initBal,
-          'Initial balance added by owner',
-          actor
-        );
-      }
+      const curUnitVal = !isNaN(curU) && curU >= 0 ? curU : 0;
+      const prevUnitVal = !isNaN(prevU) && prevU >= 0 ? prevU : 0;
+      const initBalVal = !isNaN(initBal) && initBal >= 0 ? initBal : 0;
 
-      if (!isNaN(initUnit) && initUnit > 0) {
-        const periodId = `bp-${created.id}-${targetSecId}-${selectedMonth}-${selectedYear}`;
-        const result = await updateBillingPeriodCharges(
-          periodId,
-          { current_unit: initUnit },
-          'Initial meter unit added by owner',
-          actor
-        );
-        if (!result) {
-          showToast('Warning: Could not update meter unit. Billing period not found.', 'error');
+      const periodId = `bp-${created.id}-${targetSecId}-${selectedMonth}-${selectedYear}`;
+
+      let billAmt = 0;
+      if (curUnitVal > 0 || prevUnitVal > 0) {
+        const consumed = Math.max(0, curUnitVal - prevUnitVal);
+        if (consumed <= 79) {
+          billAmt = consumed > 0 ? (consumed * 15) + 400 : 0;
+        } else {
+          billAmt = consumed * 20;
         }
       }
+
+      await updateBillingPeriodCharges(
+        periodId,
+        {
+          current_unit: curUnitVal,
+          previous_unit: prevUnitVal,
+          bill_amount: billAmt,
+          opening_balance: initBalVal,
+        },
+        'Initial setup by owner from Ledger view',
+        actor
+      );
 
       showUpdateToast(`Resident ${created.full_name} (${created.customer_code}) created successfully!`);
       setIsAddResidentOpen(false);
       setNewResidentName('');
       setNewResidentPhone('');
+      setNewResidentCurrentUnit('');
+      setNewResidentPrevUnit('');
       setNewResidentInitialBalance('');
-      setNewResidentInitialUnit('');
-      // Immediately reflect the new resident in the UI
-      setCustomers(prev => [created, ...prev]);
+
+      // Reload fresh data from storage
+      const [freshCusts, freshPeriods] = await Promise.all([
+        getCustomers(),
+        getBillingPeriods(),
+      ]);
+      setCustomers(freshCusts);
+      setBillingPeriods(freshPeriods);
       markUpdated();
       triggerDbRefresh();
     } catch (err: any) {
@@ -1245,7 +1287,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                 Name {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
               </th>
               <th className="py-2 px-3 text-right bg-[#e6f4ea] text-emerald-900 border-r border-slate-300 sticky top-[37px]">
-                Pay (Paid)
+                Pay (Paid) {isOwner && <span className="text-[9px] text-emerald-700 font-normal">(Edit)</span>}
               </th>
               <th className="py-2 px-3 text-right bg-[#fce8e6] text-rose-900 border-r border-slate-300 sticky top-[37px]">
                 This Month {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
@@ -1257,7 +1299,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                 Total Balance
               </th>
               <th className="py-2 px-3 text-right bg-rose-50 text-rose-950 font-black border-r border-slate-300 sticky top-[37px]">
-                Current Balance
+                Current Balance {isOwner && <span className="text-[9px] text-rose-700 font-normal">(Edit)</span>}
               </th>
               <th className="py-2 px-2.5 text-center border-r-2 border-emerald-400 min-w-[160px] bg-slate-100 sticky top-[37px]">
                 Actions
@@ -1265,7 +1307,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
               {/* Meter Reading Columns */}
               <th className="py-2 px-2 text-center border-r border-slate-300 bg-blue-50 sticky top-[37px]">ID</th>
-              <th className="py-2 px-3 min-w-[120px] border-r border-slate-300 bg-slate-100 sticky top-[37px]">Name</th>
+              <th className="py-2 px-3 min-w-[120px] border-r border-slate-300 bg-slate-100 sticky top-[37px]">
+                Name {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
+              </th>
               <th className="py-2 px-2.5 text-right border-r border-slate-300 bg-slate-100 sticky top-[37px]">
                 Current Unit {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
               </th>
@@ -1273,7 +1317,9 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                 Prev Unit {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
               </th>
               <th className="py-2 px-2 text-center border-r border-slate-300 bg-blue-100 font-extrabold sticky top-[37px]">U (Units)</th>
-              <th className="py-2 px-3 text-right bg-slate-100 sticky top-[37px]">Amount (₹)</th>
+              <th className="py-2 px-3 text-right bg-slate-100 sticky top-[37px]">
+                Amount (₹) {isOwner && <span className="text-[9px] text-indigo-600 font-normal">(Edit)</span>}
+              </th>
             </tr>
           </thead>
 
@@ -1312,11 +1358,17 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       </span>
                     </td>
 
-                    {/* 2. Name with down/right arrow '>' & expansion */}
+                    {/* 2. Name with down/right arrow '>' & expansion - Direct edit for Owner */}
                     <td
-                      onClick={() => toggleExpandCustomer(row.customer.id)}
-                      className="py-2 px-3 font-bold text-slate-900 border-r border-slate-200 whitespace-nowrap cursor-pointer hover:bg-blue-50 group relative"
-                      title="Click name or '>' to view detail table"
+                      onClick={() => {
+                        if (isOwner) {
+                          handleCellClick(row.customer.id, row.targetSectionId, 'name', row.name, row.period?.id);
+                        }
+                      }}
+                      className={`py-2 px-3 font-bold text-slate-900 border-r border-slate-200 whitespace-nowrap ${
+                        isOwner ? 'cursor-pointer hover:bg-blue-50 group' : ''
+                      }`}
+                      title={isOwner ? 'Click to directly edit resident name' : 'Click arrow to expand'}
                     >
                       {editingCell?.customerId === row.customer.id && editingCell?.field === 'name' ? (
                         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
@@ -1329,7 +1381,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                               if (e.key === 'Enter') handleCellSave(row.customer.id, row.targetSectionId, 'name');
                               if (e.key === 'Escape') setEditingCell(null);
                             }}
-                            className="w-32 px-1.5 py-0.5 text-xs font-bold border-2 border-indigo-600 rounded bg-white"
+                            className="w-36 px-1.5 py-0.5 text-xs font-bold border-2 border-indigo-600 rounded bg-white"
                           />
                           <button
                             disabled={savingCell}
@@ -1342,32 +1394,69 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       ) : (
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-extrabold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 text-[10px]">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleExpandCustomer(row.customer.id);
+                              }}
+                              className="font-extrabold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 text-[10px] hover:bg-blue-100"
+                              title="Toggle detail table"
+                            >
                               {expandedCustomerIds[row.customer.id] ? 'v' : '>'}
-                            </span>
+                            </button>
                             <span>{row.name}</span>
                           </div>
                           {isOwner && (
-                            <button
-                              onClick={e => {
-                                e.stopPropagation();
-                                handleCellClick(row.customer.id, row.targetSectionId, 'name', row.name, row.period?.id);
-                              }}
-                              className="text-[10px] text-indigo-600 font-semibold hover:underline opacity-0 group-hover:opacity-100"
-                              title="Edit Name"
-                            >
-                              Edit
-                            </button>
+                            <Pencil className="w-2.5 h-2.5 text-indigo-500 opacity-0 group-hover:opacity-100" />
                           )}
                         </div>
                       )}
                     </td>
 
-                    {/* 3. Pay (Paid Amount) - Read Only in Table, Updated via Action > Update */}
-                    <td className="py-2 px-3 text-right font-black text-emerald-800 bg-[#e6f4ea]/70 border-r border-slate-200" title="Payment recorded via Action > Update">
-                      <div className="flex items-center justify-end">
-                        <span>{row.pay > 0 ? row.pay : 0}</span>
-                      </div>
+                    {/* 3. Pay (Paid Amount) - Directly Editable by Owner */}
+                    <td
+                      onClick={() => {
+                        if (isOwner) {
+                          handleCellClick(row.customer.id, row.targetSectionId, 'pay', row.pay, row.period?.id);
+                        }
+                      }}
+                      className={`py-2 px-3 text-right font-black text-emerald-800 bg-[#e6f4ea]/70 border-r border-slate-200 ${
+                        isOwner ? 'cursor-pointer hover:bg-emerald-100 group' : ''
+                      }`}
+                      title={isOwner ? 'Click to directly edit paid amount' : 'Payment recorded via Action > Update'}
+                    >
+                      {editingCell?.customerId === row.customer.id && editingCell?.field === 'pay' ? (
+                        <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="number"
+                            autoFocus
+                            step="1"
+                            min="0"
+                            value={editValue}
+                            onChange={e => setEditValue(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') handleCellSave(row.customer.id, row.targetSectionId, 'pay');
+                              if (e.key === 'Escape') setEditingCell(null);
+                            }}
+                            className="w-20 px-1.5 py-0.5 text-xs font-bold border-2 border-emerald-600 rounded bg-white text-right"
+                          />
+                          <button
+                            disabled={savingCell}
+                            onClick={() => handleCellSave(row.customer.id, row.targetSectionId, 'pay')}
+                            className="p-1 bg-emerald-600 text-white rounded text-[10px]"
+                          >
+                            ✓
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-1">
+                          <span>{row.pay > 0 ? row.pay : 0}</span>
+                          {isOwner && (
+                            <Pencil className="w-2.5 h-2.5 text-emerald-600 opacity-0 group-hover:opacity-100" />
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     {/* 4. This Month Bill - Editable by Owner, Read-Only for Staff */}
@@ -1603,9 +1692,47 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       </span>
                     </td>
 
-                    {/* 10. Meter Name */}
-                    <td className="py-2 px-3 text-slate-700 border-r border-slate-200 whitespace-nowrap">
-                      {row.name}
+                    {/* 10. Meter Name - Directly Editable by Owner */}
+                    <td
+                      onClick={() => {
+                        if (isOwner) {
+                          handleCellClick(row.customer.id, row.targetSectionId, 'name', row.name, row.period?.id);
+                        }
+                      }}
+                      className={`py-2 px-3 text-slate-700 border-r border-slate-200 whitespace-nowrap ${
+                        isOwner ? 'cursor-pointer hover:bg-blue-50 group' : ''
+                      }`}
+                      title={isOwner ? 'Click to edit resident name' : ''}
+                    >
+                      {editingCell?.customerId === row.customer.id && editingCell?.field === 'name' ? (
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="text"
+                            autoFocus
+                            value={editValue}
+                            onChange={e => setEditValue(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') handleCellSave(row.customer.id, row.targetSectionId, 'name');
+                              if (e.key === 'Escape') setEditingCell(null);
+                            }}
+                            className="w-32 px-1.5 py-0.5 text-xs font-bold border-2 border-indigo-600 rounded bg-white"
+                          />
+                          <button
+                            disabled={savingCell}
+                            onClick={() => handleCellSave(row.customer.id, row.targetSectionId, 'name')}
+                            className="p-1 bg-indigo-600 text-white rounded text-[10px]"
+                          >
+                            ✓
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-1">
+                          <span>{row.name}</span>
+                          {isOwner && (
+                            <Pencil className="w-2.5 h-2.5 text-indigo-500 opacity-0 group-hover:opacity-100" />
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     {/* 11. Current Unit - Editable by Staff & Owner */}
@@ -1695,9 +1822,49 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       {row.unitsConsumed > 0 ? row.unitsConsumed : ''}
                     </td>
 
-                    {/* 14. Unit Amount */}
-                    <td className="py-2 px-3 text-right font-medium text-slate-700">
-                      {row.thisMonth > 0 ? row.thisMonth : ''}
+                    {/* 14. Unit Amount - Directly Editable by Owner */}
+                    <td
+                      onClick={() => {
+                        if (isOwner) {
+                          handleCellClick(row.customer.id, row.targetSectionId, 'this_month', row.thisMonth, row.period?.id);
+                        }
+                      }}
+                      className={`py-2 px-3 text-right font-medium text-slate-700 ${
+                        isOwner ? 'cursor-pointer hover:bg-rose-50 group' : ''
+                      }`}
+                      title={isOwner ? 'Click to edit monthly bill amount' : ''}
+                    >
+                      {editingCell?.customerId === row.customer.id && editingCell?.field === 'this_month' ? (
+                        <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="number"
+                            autoFocus
+                            step="1"
+                            min="0"
+                            value={editValue}
+                            onChange={e => setEditValue(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') handleCellSave(row.customer.id, row.targetSectionId, 'this_month');
+                              if (e.key === 'Escape') setEditingCell(null);
+                            }}
+                            className="w-20 px-1.5 py-0.5 text-xs font-bold border-2 border-rose-600 rounded bg-white text-right"
+                          />
+                          <button
+                            disabled={savingCell}
+                            onClick={() => handleCellSave(row.customer.id, row.targetSectionId, 'this_month')}
+                            className="p-1 bg-rose-600 text-white rounded text-[10px]"
+                          >
+                            ✓
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-1">
+                          <span>{row.thisMonth > 0 ? row.thisMonth : ''}</span>
+                          {isOwner && (
+                            <Pencil className="w-2.5 h-2.5 text-rose-500 opacity-0 group-hover:opacity-100" />
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
 
@@ -2075,12 +2242,11 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  Phone Number *
+                  Phone Number <span className="text-slate-400 font-normal">(optional)</span>
                 </label>
                 <input
                   type="tel"
-                  required
-                  placeholder="e.g. 9876543210"
+                  placeholder="e.g. 9876543210 (optional)"
                   value={newResidentPhone}
                   onChange={e => setNewResidentPhone(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-indigo-600 font-semibold text-slate-900"
@@ -2090,32 +2256,47 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">
-                    Initial Balance (₹)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={newResidentInitialBalance}
-                    onChange={e => setNewResidentInitialBalance(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-indigo-600 font-bold text-rose-700"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    Initial Meter Unit
+                    Current Unit
                   </label>
                   <input
                     type="number"
                     step="1"
                     min="0"
                     placeholder="0"
-                    value={newResidentInitialUnit}
-                    onChange={e => setNewResidentInitialUnit(e.target.value)}
+                    value={newResidentCurrentUnit}
+                    onChange={e => setNewResidentCurrentUnit(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-indigo-600 font-bold text-blue-700"
                   />
                 </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Prev Unit
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    placeholder="0"
+                    value={newResidentPrevUnit}
+                    onChange={e => setNewResidentPrevUnit(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-indigo-600 font-bold text-blue-700"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Initial Balance (₹) <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  value={newResidentInitialBalance}
+                  onChange={e => setNewResidentInitialBalance(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-indigo-600 font-bold text-rose-700"
+                />
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
