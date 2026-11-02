@@ -37,11 +37,25 @@ const STORAGE_KEYS = {
 
 // Local storage helpers with fallback to initial seed
 function getStored<T>(key: string, defaultData: T): T {
-  return defaultData;
+  try {
+    if (typeof window === 'undefined') return defaultData;
+    const raw = localStorage.getItem(key);
+    if (!raw) return defaultData;
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error(`Error reading ${key} from storage:`, err);
+    return defaultData;
+  }
 }
 
 function setStored<T>(key: string, data: T): void {
-  // no-op: data lives only in Supabase
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(key, JSON.stringify(data));
+    }
+  } catch (err) {
+    console.error(`Error writing ${key} to storage:`, err);
+  }
 }
 
 const syncBroadcast = typeof window !== 'undefined' && 'BroadcastChannel' in window 
@@ -110,19 +124,25 @@ export async function seedSupabaseIfEmpty(): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
   try {
-    const { count, error } = await supabase.from('customers').select('*', { count: 'exact', head: true });
-    if (!error && (count === 0 || count === null)) {
+    const { data } = await supabase
+      .from('system_settings')
+      .select('key')
+      .eq('key', STORAGE_KEYS.CUSTOMERS)
+      .maybeSingle();
+    if (!data) {
+      const { pushKeyToCloud } = await import('./syncService');
       const customers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
       const sections = getStored<CollectionSection[]>(STORAGE_KEYS.SECTIONS, INITIAL_SECTIONS);
       const profiles = getStored<Profile[]>(STORAGE_KEYS.PROFILES, INITIAL_PROFILES);
       const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
       const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
-
-      await supabase.from('profiles').upsert(profiles);
-      await supabase.from('collection_sections').upsert(sections);
-      await supabase.from('customers').upsert(customers);
-      await supabase.from('billing_periods').upsert(periods);
-      await supabase.from('collections').upsert(collections);
+      await Promise.all([
+        pushKeyToCloud(STORAGE_KEYS.CUSTOMERS, customers, 'System'),
+        pushKeyToCloud(STORAGE_KEYS.SECTIONS, sections, 'System'),
+        pushKeyToCloud(STORAGE_KEYS.PROFILES, profiles, 'System'),
+        pushKeyToCloud(STORAGE_KEYS.BILLING_PERIODS, periods, 'System'),
+        pushKeyToCloud(STORAGE_KEYS.COLLECTIONS, collections, 'System'),
+      ]);
       return true;
     }
   } catch (err) {
@@ -135,7 +155,8 @@ export async function seedSupabaseIfEmpty(): Promise<boolean> {
 // PROFILES / EMPLOYEES
 // -------------------------------------------------------------
 export async function getProfiles(): Promise<Profile[]> {
-  const local = getStored<Profile[]>(STORAGE_KEYS.PROFILES, INITIAL_PROFILES);
+  const local = getStored<Profile[]>(STORAGE_KEYS.PROFILES, []);
+  if (local && local.length > 0) return local;
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -152,7 +173,7 @@ export async function getProfiles(): Promise<Profile[]> {
       console.warn('Supabase getProfiles error:', e);
     }
   }
-  return local;
+  return INITIAL_PROFILES;
 }
 
 export async function getProfileById(id: string): Promise<Profile | undefined> {
@@ -342,7 +363,8 @@ export async function deleteEmployee(
 // SECTIONS
 // -------------------------------------------------------------
 export async function getSections(): Promise<CollectionSection[]> {
-  const local = getStored<CollectionSection[]>(STORAGE_KEYS.SECTIONS, INITIAL_SECTIONS);
+  const local = getStored<CollectionSection[]>(STORAGE_KEYS.SECTIONS, []);
+  if (local && local.length > 0) return local;
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -359,7 +381,7 @@ export async function getSections(): Promise<CollectionSection[]> {
       console.warn('Supabase getSections error:', e);
     }
   }
-  return local;
+  return INITIAL_SECTIONS;
 }
 
 export async function updateSectionName(
@@ -397,7 +419,8 @@ export async function updateSectionName(
 // CUSTOMERS
 // -------------------------------------------------------------
 export async function getCustomers(): Promise<Customer[]> {
-  const local = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
+  const local = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, []);
+  if (local && local.length > 0) return local;
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -414,7 +437,7 @@ export async function getCustomers(): Promise<Customer[]> {
       console.warn('Supabase getCustomers error:', e);
     }
   }
-  return local;
+  return INITIAL_CUSTOMERS;
 }
 
 export async function getCustomerById(id: string): Promise<Customer | undefined> {
@@ -592,7 +615,8 @@ export async function deleteCustomer(
 // BILLING PERIODS
 // -------------------------------------------------------------
 export async function getBillingPeriods(): Promise<BillingPeriod[]> {
-  const local = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
+  const local = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, []);
+  if (local && local.length > 0) return local;
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -609,7 +633,7 @@ export async function getBillingPeriods(): Promise<BillingPeriod[]> {
       console.warn('Supabase getBillingPeriods error:', e);
     }
   }
-  return local;
+  return INITIAL_BILLING_PERIODS;
 }
 
 export async function getBillingPeriodById(id: string): Promise<BillingPeriod | undefined> {
@@ -621,6 +645,7 @@ export async function updateBillingPeriodCharges(
   id: string,
   charges: {
     bill_amount?: number;
+    opening_balance?: number;
     additional_charges?: number;
     credits_or_adjustments?: number;
     due_date?: string;
@@ -641,6 +666,7 @@ export async function updateBillingPeriodCharges(
 
   const prevValues = {
     bill_amount: target.bill_amount,
+    opening_balance: target.opening_balance,
     additional_charges: target.additional_charges,
     credits_or_adjustments: target.credits_or_adjustments,
     paid_amount: target.paid_amount,
@@ -651,6 +677,7 @@ export async function updateBillingPeriodCharges(
   };
 
   if (charges.bill_amount !== undefined) target.bill_amount = charges.bill_amount;
+  if (charges.opening_balance !== undefined) target.opening_balance = charges.opening_balance;
   if (charges.additional_charges !== undefined) target.additional_charges = charges.additional_charges;
   if (charges.credits_or_adjustments !== undefined) target.credits_or_adjustments = charges.credits_or_adjustments;
   if (charges.due_date) target.due_date = charges.due_date;
@@ -672,7 +699,7 @@ export async function updateBillingPeriodCharges(
   if (charges.closing_balance !== undefined) {
     target.closing_balance = charges.closing_balance;
     target.total_amount_due = Number((target.paid_amount + target.closing_balance).toFixed(2));
-  } else if (charges.bill_amount !== undefined || charges.additional_charges !== undefined || charges.credits_or_adjustments !== undefined || charges.paid_amount !== undefined) {
+  } else if (charges.bill_amount !== undefined || charges.opening_balance !== undefined || charges.additional_charges !== undefined || charges.credits_or_adjustments !== undefined || charges.paid_amount !== undefined) {
     // Recalculate totals only if bill-related fields changed
     target.total_amount_due = Number((target.opening_balance + target.bill_amount + target.additional_charges - target.credits_or_adjustments).toFixed(2));
     target.closing_balance = Number((target.total_amount_due - target.paid_amount).toFixed(2));
@@ -980,7 +1007,8 @@ export async function carryForwardMonth(
 // COLLECTIONS / PAYMENTS
 // -------------------------------------------------------------
 export async function getCollections(): Promise<Collection[]> {
-  const local = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+  const local = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, []);
+  if (local && local.length > 0) return local;
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -997,7 +1025,7 @@ export async function getCollections(): Promise<Collection[]> {
       console.warn('Supabase getCollections error:', e);
     }
   }
-  return local;
+  return INITIAL_COLLECTIONS;
 }
 
 export async function addCollection(
@@ -1310,7 +1338,8 @@ export async function saveCashReconciliation(
 // AUDIT LOGS
 // -------------------------------------------------------------
 export async function getAuditLogs(): Promise<AuditLog[]> {
-  const local = getStored<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+  const local = getStored<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, []);
+  if (local && local.length > 0) return local;
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -1327,7 +1356,7 @@ export async function getAuditLogs(): Promise<AuditLog[]> {
       console.warn('Supabase getAuditLogs error:', e);
     }
   }
-  return local;
+  return INITIAL_AUDIT_LOGS;
 }
 
 export async function addAuditLog(entry: Omit<AuditLog, 'id' | 'created_at'>): Promise<void> {

@@ -561,6 +561,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             showUpdateToast(`Updated meter reading to ${numVal}!`);
           }
         }
+      } else if (field === 'prev_unit') {
         if (!isOwner) {
           showToast('Only Owner can edit previous meter readings.', 'error');
           setEditingCell(null);
