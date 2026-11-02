@@ -10,6 +10,7 @@ import {
   SystemSettings,
   DashboardMetrics,
   PaymentStatus,
+  LedgerHistoryEntry,
 } from '../types';
 import {
   INITIAL_PROFILES,
@@ -33,6 +34,7 @@ const STORAGE_KEYS = {
   AUDIT_LOGS: 'col_db_audit_logs_v1',
   CASH_RECONCILIATION: 'col_db_cash_recon_v1',
   SETTINGS: 'col_db_settings_v1',
+  LEDGER_HISTORY: 'col_db_ledger_history_v1',
 };
 
 // Local storage helpers with fallback to initial seed
@@ -727,6 +729,28 @@ export async function updateBillingPeriodCharges(
   // Broadcast updated billing_periods to all connected devices
   await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
 
+  try {
+    await addLedgerHistoryEntry({
+      customer_id: target.customer_id,
+      section_id: target.section_id,
+      current_unit: target.current_unit ?? 0,
+      prev_unit: target.previous_unit ?? 0,
+      units_consumed: target.units_consumed ?? 0,
+      bill_amount: target.bill_amount,
+      opening_balance: target.opening_balance,
+      total_amount_due: target.total_amount_due,
+      paid_amount: target.paid_amount,
+      payment_method: '-',
+      closing_balance: target.closing_balance,
+      billing_month: target.billing_month,
+      billing_year: target.billing_year,
+      notes: reason || 'Updated monthly bill charges & balances',
+      actor_name: actor.name,
+    });
+  } catch (err) {
+    console.warn('Failed to record ledger history entry:', err);
+  }
+
   return target;
 }
 
@@ -810,6 +834,28 @@ export async function updateRemainingDueDirectly(
 
   // Broadcast to all connected devices
   await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
+
+  try {
+    await addLedgerHistoryEntry({
+      customer_id: target.customer_id,
+      section_id: target.section_id,
+      current_unit: target.current_unit ?? 0,
+      prev_unit: target.previous_unit ?? 0,
+      units_consumed: target.units_consumed ?? 0,
+      bill_amount: target.bill_amount,
+      opening_balance: target.opening_balance,
+      total_amount_due: target.total_amount_due,
+      paid_amount: target.paid_amount,
+      payment_method: '-',
+      closing_balance: target.closing_balance,
+      billing_month: target.billing_month,
+      billing_year: target.billing_year,
+      notes: reason || 'Directly edited remaining due',
+      actor_name: actor.name,
+    });
+  } catch (err) {
+    console.warn('Failed to record ledger history entry:', err);
+  }
 
   return target;
 }
@@ -947,6 +993,7 @@ export async function carryForwardMonth(
         );
 
         const openingBalance = prevPeriod ? Math.max(0, prevPeriod.closing_balance) : 0.00;
+        const lastCurrentUnit = prevPeriod ? (prevPeriod.current_unit ?? 0) : 0;
 
         periods.push({
           id: `bp-${customer.id}-${sectionId}-${targetMonth}-${targetYear}`,
@@ -963,6 +1010,9 @@ export async function carryForwardMonth(
           closing_balance: openingBalance,
           due_date: `${targetYear}-${targetMonth.toString().padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
           payment_status: openingBalance > 0 ? 'Pending' : 'Paid',
+          current_unit: lastCurrentUnit,
+          previous_unit: lastCurrentUnit,
+          units_consumed: 0,
           sync_device: device,
           sync_device_info: device_info,
           sync_timestamp: timestamp,
@@ -1127,6 +1177,30 @@ export async function addCollection(
 
   // Broadcast updated billing_periods + collections to all connected devices
   await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
+
+  if (targetPeriod) {
+    try {
+      await addLedgerHistoryEntry({
+        customer_id: newCollection.customer_id,
+        section_id: newCollection.section_id,
+        current_unit: targetPeriod.current_unit ?? 0,
+        prev_unit: targetPeriod.previous_unit ?? 0,
+        units_consumed: targetPeriod.units_consumed ?? 0,
+        bill_amount: targetPeriod.bill_amount,
+        opening_balance: targetPeriod.opening_balance,
+        total_amount_due: targetPeriod.total_amount_due,
+        paid_amount: targetPeriod.paid_amount,
+        payment_method: newCollection.payment_method || 'Cash',
+        closing_balance: targetPeriod.closing_balance,
+        billing_month: targetPeriod.billing_month,
+        billing_year: targetPeriod.billing_year,
+        notes: `Payment of ₹${newCollection.amount} (${newCollection.payment_method})`,
+        actor_name: actor.name,
+      });
+    } catch (err) {
+      console.warn('Failed to record ledger history entry on payment:', err);
+    }
+  }
 
   return newCollection;
 }
@@ -1790,3 +1864,81 @@ export async function importOctober26Data(actor: { id: string; name: string }): 
   return { s1: s1Created, s2: s2Created };
 }
 
+
+// -------------------------------------------------------------
+// LEDGER HISTORY (2ND SHEET CONTINUOUS AUDIT TRAIL)
+// -------------------------------------------------------------
+export async function getLedgerHistory(customerId?: string, sectionId?: string): Promise<LedgerHistoryEntry[]> {
+  let list = getStored<LedgerHistoryEntry[]>(STORAGE_KEYS.LEDGER_HISTORY, []);
+  if (!list || list.length === 0) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', STORAGE_KEYS.LEDGER_HISTORY)
+          .maybeSingle();
+        if (!error && data?.value && Array.isArray(data.value)) {
+          setStored(STORAGE_KEYS.LEDGER_HISTORY, data.value);
+          list = data.value;
+        }
+      } catch (e) {
+        console.warn('Supabase getLedgerHistory error:', e);
+      }
+    }
+  }
+
+  if (customerId) {
+    list = list.filter(h => h.customer_id === customerId);
+  }
+  if (sectionId && sectionId !== 'all') {
+    list = list.filter(h => h.section_id === sectionId);
+  }
+  return list;
+}
+
+export async function addLedgerHistoryEntry(
+  entry: Omit<LedgerHistoryEntry, 'id' | 'timestamp' | 'date_time_str'> & {
+    id?: string;
+    timestamp?: string;
+    date_time_str?: string;
+  }
+): Promise<LedgerHistoryEntry> {
+  const history = getStored<LedgerHistoryEntry[]>(STORAGE_KEYS.LEDGER_HISTORY, []);
+  const now = new Date();
+  const date_time_str = entry.date_time_str || now.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+  const newEntry: LedgerHistoryEntry = {
+    id: entry.id || `hist-${entry.customer_id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: entry.timestamp || now.toISOString(),
+    date_time_str,
+    customer_id: entry.customer_id,
+    section_id: entry.section_id,
+    current_unit: entry.current_unit,
+    prev_unit: entry.prev_unit,
+    units_consumed: entry.units_consumed,
+    bill_amount: entry.bill_amount,
+    opening_balance: entry.opening_balance,
+    total_amount_due: entry.total_amount_due,
+    paid_amount: entry.paid_amount,
+    payment_method: entry.payment_method || '-',
+    closing_balance: entry.closing_balance,
+    billing_month: entry.billing_month,
+    billing_year: entry.billing_year,
+    notes: entry.notes || '',
+    actor_name: entry.actor_name || 'Staff',
+  };
+
+  history.unshift(newEntry);
+  setStored(STORAGE_KEYS.LEDGER_HISTORY, history);
+
+  await broadcastDataSync([STORAGE_KEYS.LEDGER_HISTORY], entry.actor_name);
+  return newEntry;
+}

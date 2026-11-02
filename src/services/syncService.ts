@@ -22,6 +22,7 @@ export const SYNC_KEYS = {
   REVERSALS:           'col_db_reversals_v1',
   CASH_RECONCILIATION: 'col_db_cash_recon_v1',
   SETTINGS:            'col_db_settings_v1',
+  LEDGER_HISTORY:      'col_db_ledger_history_v1',
 };
 
 const ALL_KEYS = Object.values(SYNC_KEYS);
@@ -186,10 +187,54 @@ export async function pushKeyToCloud(key: string, data: unknown, actorName?: str
  * Called after any write operation (payments, balance edits, meter updates)
  */
 export async function syncAfterWrite(changedKeys: string[], actorName?: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const nowStr = new Date().toISOString();
+
+  // 1. Write locally and to Supabase for all changed keys
   for (const key of changedKeys) {
     const data = readLocal(key, null);
     if (data !== null) {
-      await pushKeyToCloud(key, data, actorName);
+      writeLocal(key, data);
+      if (supabase) {
+        _lastSyncedTimestamps[key] = nowStr;
+        try {
+          await supabase.from('system_settings').upsert({
+            key,
+            value: data,
+            updated_at: nowStr,
+          });
+        } catch (e) {
+          console.warn(`[Sync] Supabase upsert error on ${key}:`, e);
+        }
+      }
+    }
+  }
+
+  // 2. Notify other tabs on same device via BroadcastChannel
+  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    try {
+      const bc = new BroadcastChannel('money_collection_live_sync');
+      bc.postMessage({ keys: changedKeys, timestamp: Date.now() });
+      bc.close();
+    } catch { /* ignore */ }
+  }
+
+  // 3. Send single Supabase Realtime broadcast with all changed keys
+  if (_channel) {
+    try {
+      await _channel.send({
+        type: 'broadcast',
+        event: 'data_changed',
+        payload: {
+          key: changedKeys[0] || 'all',
+          keys: changedKeys,
+          actorName: actorName || 'Staff',
+          deviceId: _deviceId,
+          timestamp: Date.now(),
+        },
+      });
+    } catch (e) {
+      console.warn('[Sync] Broadcast send error:', e);
     }
   }
 }
@@ -224,25 +269,41 @@ export function initSync(
         config: { broadcast: { self: false } },
       })
       .on('broadcast', { event: 'data_changed' }, async (msg: any) => {
-        const { key, actorName, deviceId } = msg?.payload || {};
+        const { key, keys, actorName, deviceId } = msg?.payload || {};
         if (deviceId === _deviceId) return; // Don't process own broadcasts
 
-        console.log(`[Sync] Live change received from ${actorName} on ${key}`);
+        console.log(`[Sync] Live change received from ${actorName} on ${key || (keys && keys.join(','))}`);
 
-        if (key && ALL_KEYS.includes(key)) {
-          // Fetch the latest value from cloud
-          const updatedData = await pullKeyFromCloud(key);
-          if (updatedData !== null) {
-            _onRefresh?.();
+        const incomingKeys: string[] = Array.isArray(keys) && keys.length > 0 ? keys : (key ? [key] : []);
+        const toPull = new Set<string>(incomingKeys);
 
-            if (actorName && _showNotification) {
-              const friendlyKey =
-                key === SYNC_KEYS.BILLING_PERIODS ? 'Balances & Ledger' :
-                key === SYNC_KEYS.COLLECTIONS ? 'Payments' :
-                key === SYNC_KEYS.AUDIT_LOGS ? 'Activity Logs' :
-                key === SYNC_KEYS.CUSTOMERS ? 'Resident Info' : 'Data';
-              _showNotification(`${actorName} updated ${friendlyKey} in real-time`);
-            }
+        // Core data bundle: always pull together so resident info & billing periods stay 100% in sync
+        if (incomingKeys.some(k => k === SYNC_KEYS.CUSTOMERS || k === SYNC_KEYS.BILLING_PERIODS || k === SYNC_KEYS.COLLECTIONS || k === SYNC_KEYS.LEDGER_HISTORY)) {
+          toPull.add(SYNC_KEYS.CUSTOMERS);
+          toPull.add(SYNC_KEYS.BILLING_PERIODS);
+          toPull.add(SYNC_KEYS.COLLECTIONS);
+          toPull.add(SYNC_KEYS.LEDGER_HISTORY);
+        }
+
+        let anyUpdated = false;
+        await Promise.all(Array.from(toPull).map(async (k) => {
+          if (ALL_KEYS.includes(k)) {
+            const res = await pullKeyFromCloud(k);
+            if (res !== null) anyUpdated = true;
+          }
+        }));
+
+        if (anyUpdated) {
+          _onRefresh?.();
+
+          if (actorName && _showNotification) {
+            const friendlyKey =
+              toPull.has(SYNC_KEYS.CUSTOMERS) ? 'Resident Info' :
+              toPull.has(SYNC_KEYS.BILLING_PERIODS) ? 'Balances & Ledger' :
+              toPull.has(SYNC_KEYS.COLLECTIONS) ? 'Payments' :
+              toPull.has(SYNC_KEYS.LEDGER_HISTORY) ? 'Resident History' :
+              toPull.has(SYNC_KEYS.AUDIT_LOGS) ? 'Activity Logs' : 'Data';
+            _showNotification(`${actorName} updated ${friendlyKey} in real-time`);
           }
         }
       })

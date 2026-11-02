@@ -179,3 +179,24 @@ export interface DashboardMetrics {
   overdueCustomers: number;
   totalCustomers: number;
 }
+
+export interface LedgerHistoryEntry {
+  id: string;
+  customer_id: string;
+  section_id: string;
+  timestamp: string;
+  date_time_str: string;
+  current_unit: number;
+  prev_unit: number;
+  units_consumed: number;
+  bill_amount: number;
+  opening_balance: number;
+  total_amount_due: number;
+  paid_amount: number;
+  payment_method: string;
+  closing_balance: number;
+  billing_month: number;
+  billing_year: number;
+  notes?: string;
+  actor_name?: string;
+}

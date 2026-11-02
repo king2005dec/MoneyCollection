@@ -79,6 +79,34 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   };
 
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [ledgerHistory, setLedgerHistory] = useState<LedgerHistoryEntry[]>([]);
+  const [currentTimeTicker, setCurrentTimeTicker] = useState<number>(Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setCurrentTimeTicker(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  const cycleDates = useMemo(() => {
+    const startM = selectedMonth;
+    const startY = selectedYear;
+    const endM = selectedMonth === 12 ? 1 : selectedMonth + 1;
+    const endY = selectedMonth === 12 ? selectedYear + 1 : selectedYear;
+
+    const startStr = `05/${String(startM).padStart(2, '0')}/${startY}`;
+    const endStr = `05/${String(endM).padStart(2, '0')}/${endY}`;
+
+    const now = new Date();
+    const endCycleDate = new Date(endY, endM - 1, 5, 23, 59, 59);
+    const diffMs = endCycleDate.getTime() - now.getTime();
+    const remainingDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    return {
+      startStr,
+      endStr,
+      remainingDays,
+    };
+  }, [selectedMonth, selectedYear, currentTimeTicker]);
   const [billingPeriods, setBillingPeriods] = useState<BillingPeriod[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [sections, setSections] = useState<CollectionSection[]>([]);
@@ -1265,6 +1293,36 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
 
 
+      {/* Real-Time Billing Period & Cycle Countdown Bar */}
+      <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 border-y border-emerald-300 px-4 py-2 flex flex-wrap items-center justify-between gap-2.5 text-xs shadow-inner">
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-emerald-700 shrink-0" />
+          <span className="font-extrabold text-slate-800">Billing Cycle:</span>
+          <span className="font-black text-slate-900 bg-white px-2.5 py-0.5 rounded-md border border-slate-300 shadow-2xs tracking-wide">
+            starting {cycleDates.startStr} - ending {cycleDates.endStr}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-slate-700">Status:</span>
+          <span className={`px-3 py-0.5 rounded-full font-black text-xs shadow-2xs ${
+            cycleDates.remainingDays > 0
+              ? 'bg-amber-100 text-amber-900 border border-amber-400'
+              : cycleDates.remainingDays === 0
+              ? 'bg-rose-500 text-white animate-pulse'
+              : 'bg-slate-200 text-slate-700 border border-slate-300'
+          }`}>
+            {cycleDates.remainingDays > 0
+              ? `remeding day ${cycleDates.remainingDays}`
+              : cycleDates.remainingDays === 0
+              ? 'ending today (5th)!'
+              : `ended ${Math.abs(cycleDates.remainingDays)} days ago`}
+          </span>
+          <span className="text-[11px] text-slate-500 font-medium">
+            (5th to 5th monthly cycle • Real-time)
+          </span>
+        </div>
+      </div>
+
       {/* 3. The Spreadsheet Table */}
       <div className="overflow-x-auto max-h-[70vh] relative">
         <table className="w-full text-left border-collapse font-sans text-xs min-w-[1100px]">
@@ -1906,6 +1964,71 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                               </thead>
                               <tbody>
                                 {(() => {
+                                  // 1. Fetch continuous update history for this customer (persists across months)
+                                  const customerLedgerEntries = ledgerHistory
+                                    .filter(h => h.customer_id === row.customer.id && (activeTab === 'all' || h.section_id === row.targetSectionId))
+                                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+                                  // If continuous update history exists, render each history row
+                                  if (customerLedgerEntries.length > 0) {
+                                    return customerLedgerEntries.map((entry, hIdx) => {
+                                      const periodForInvoice: BillingPeriod = row.period || {
+                                        id: `bp-${row.customer.id}-${row.targetSectionId}-${entry.billing_month}-${entry.billing_year}`,
+                                        customer_id: row.customer.id,
+                                        section_id: row.targetSectionId,
+                                        billing_month: entry.billing_month,
+                                        billing_year: entry.billing_year,
+                                        opening_balance: entry.opening_balance,
+                                        bill_amount: entry.bill_amount,
+                                        additional_charges: 0,
+                                        credits_or_adjustments: 0,
+                                        total_amount_due: entry.total_amount_due,
+                                        paid_amount: entry.paid_amount,
+                                        closing_balance: entry.closing_balance,
+                                        due_date: `${entry.billing_year}-${String(entry.billing_month).padStart(2, '0')}-05`,
+                                        payment_status: entry.closing_balance <= 0 ? 'Paid' : 'Pending',
+                                        current_unit: entry.current_unit,
+                                        previous_unit: entry.prev_unit,
+                                        units_consumed: entry.units_consumed,
+                                        created_at: entry.timestamp,
+                                        updated_at: entry.timestamp,
+                                      };
+
+                                      return (
+                                        <tr key={entry.id || hIdx} className="bg-white hover:bg-slate-50 border-b border-slate-100">
+                                          <td className="p-2 border border-slate-200 font-bold text-slate-800 text-[10px] whitespace-nowrap">
+                                            {entry.date_time_str || (entry.timestamp ? new Date(entry.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : deviceTimeStr())}
+                                          </td>
+                                          <td className="p-2 border border-slate-200 text-right font-bold text-blue-700">{entry.current_unit}</td>
+                                          <td className="p-2 border border-slate-200 text-right font-bold text-slate-600">{entry.prev_unit}</td>
+                                          <td className="p-2 border border-slate-200 text-right font-extrabold text-indigo-700">{entry.units_consumed}</td>
+                                          <td className="p-2 border border-slate-200 text-right font-bold text-rose-700">{formatCurrency(entry.bill_amount)}</td>
+                                          <td className="p-2 border border-slate-200 text-right font-bold text-amber-700">{formatCurrency(entry.opening_balance)}</td>
+                                          <td className="p-2 border border-slate-200 text-right font-extrabold text-slate-900">{formatCurrency(entry.total_amount_due)}</td>
+                                          <td className="p-2 border border-slate-200 text-right font-bold text-emerald-700 bg-emerald-50/50">{formatCurrency(entry.paid_amount)}</td>
+                                          <td className="p-2 border border-slate-200 text-center font-medium">
+                                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 font-bold text-[10px]">
+                                              {entry.payment_method || '-'}
+                                            </span>
+                                          </td>
+                                          <td className="p-2 border border-slate-200 text-right font-black text-rose-800">{formatCurrency(Math.max(0, entry.closing_balance))}</td>
+                                          <td className="p-2 border border-slate-200 text-center">
+                                            <button
+                                              type="button"
+                                              onClick={() => openInvoiceModal(row.customer, periodForInvoice)}
+                                              className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 hover:bg-blue-600 hover:text-white text-blue-700 rounded text-[10px] font-bold transition shadow-2xs cursor-pointer"
+                                              title="Download or Print Invoice"
+                                            >
+                                              <Download className="w-3 h-3" />
+                                              <span>Invoice</span>
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    });
+                                  }
+
+                                  // 2. Fallback to billing periods if continuous update log is empty yet
                                   const historyPeriods = billingPeriods
                                     .filter(p => p.customer_id === row.customer.id && (activeTab === 'all' || p.section_id === row.targetSectionId))
                                     .sort((a, b) => {
@@ -1966,7 +2089,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                   return historyPeriods.map((hp, hIdx) => {
                                     const hpThisMonth = hp.bill_amount + hp.additional_charges - hp.credits_or_adjustments;
                                     const hpUnits = hp.units_consumed ?? Math.max(0, (hp.current_unit ?? 0) - (hp.previous_unit ?? 0));
-                                    const dateStr = `${hp.billing_month}/1/${hp.billing_year}`;
 
                                     return (
                                       <tr key={hp.id || hIdx} className="bg-white hover:bg-slate-50 border-b border-slate-100">
@@ -1996,8 +2118,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                                       </tr>
                                     );
                                   });
-                                })()}
-                              </tbody>
+                                })()}</tbody>
                             </table>
                           </div>
                         </div>
