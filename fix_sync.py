@@ -31,3 +31,4 @@ with open('src/services/databaseService.ts', 'wb') as f:
     f.write(content.encode('utf-8'))
 
 print('Done')
+
