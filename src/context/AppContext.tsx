@@ -133,17 +133,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDbVersion(v => v + 1);
   };
 
-  // ─── REAL-TIME CROSS-DEVICE SYNC ─────────────────────────────────────────────
-  // Uses syncService which handles:
-  //   • Supabase Broadcast (instant push to all devices)
-  //   • Supabase DB pull on connect (get existing data)
-  //   • State request/response (new device gets full snapshot from online peers)
-  //   • 30-second periodic DB poll (catch any missed updates)
-  //   • localStorage storage event (same-browser tabs)
+  // ─── REAL-TIME CROSS-DEVICE SYNC (Raj + 3 Staff) ───────────────────────────
+  // Uses syncService backed by Supabase system_settings + Realtime Broadcast:
+  //   • Supabase Cloud state: 100% persistent for all 4 devices
+  //   • Realtime Broadcast: instant sub-second sync across devices
+  //   • 4-second heartbeat polling: guaranteed fallback even with flaky connection
+  //   • Shows live notification banner when another staff/owner makes updates
   useEffect(() => {
-    const cleanup = initSync(() => triggerDbRefresh());
-    // Wire broadcast sender for databaseService writes
-    setBroadcastSender(null); // syncService handles broadcast internally now
+    const cleanup = initSync(
+      () => triggerDbRefresh(),
+      (msg: string) => showToast(msg, 'info')
+    );
     return cleanup;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

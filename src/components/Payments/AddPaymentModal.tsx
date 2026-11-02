@@ -45,7 +45,7 @@ const MONTH_NAMES = [
 ];
 
 export const AddPaymentModal: React.FC = () => {
-  const { currentUser } = useAuth();
+  const { currentUser, isOwner } = useAuth();
   const { paymentModal, closePaymentModal, triggerDbRefresh, showToast, openReceiptModal } = useApp();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -236,7 +236,7 @@ export const AddPaymentModal: React.FC = () => {
     try {
       const actor = {
         id: currentUser?.id || 'usr-owner-001',
-        name: currentUser?.full_name || 'Admin',
+        name: currentUser?.full_name || (isOwner ? 'Raj' : 'Staff'),
       };
       const updated = await updateRemainingDueDirectly(
         selectedCustomerId,
@@ -290,7 +290,7 @@ export const AddPaymentModal: React.FC = () => {
     try {
       const actor = {
         id: currentUser?.id || 'usr-owner-001',
-        name: currentUser?.full_name || 'Admin',
+        name: currentUser?.full_name || (isOwner ? 'Raj' : 'Staff'),
       };
       const updated = await updateLastMonthPaidDirectly(
         selectedCustomerId,
@@ -348,7 +348,7 @@ export const AddPaymentModal: React.FC = () => {
     try {
       const actor = {
         id: currentUser?.id || 'usr-owner-001',
-        name: currentUser?.full_name || 'Admin',
+        name: currentUser?.full_name || (isOwner ? 'Raj' : 'Staff'),
       };
 
       const newRecord = await addCollection(

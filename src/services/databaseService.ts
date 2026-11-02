@@ -68,25 +68,12 @@ export function setBroadcastSender(fn: BroadcastSendFn | null): void {
   _broadcastSender = fn;
 }
 
-async function broadcastDataSync(changedKeys: string[]): Promise<void> {
-  // Primary path: syncService handles broadcast + Supabase DB upsert
+async function broadcastDataSync(changedKeys: string[], actorName?: string): Promise<void> {
   try {
     const { syncAfterWrite } = await import('./syncService');
-    await syncAfterWrite(changedKeys);
-    return;
-  } catch { /* fall through to legacy */ }
-
-  // Legacy fallback via AppContext-registered sender
-  if (!_broadcastSender) return;
-  for (const key of changedKeys) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const data = JSON.parse(raw);
-      await _broadcastSender(key, data);
-    } catch (e) {
-      console.warn('[Sync] broadcastDataSync error for key', key, e);
-    }
+    await syncAfterWrite(changedKeys, actorName);
+  } catch (e) {
+    console.warn('[Sync] broadcastDataSync error:', e);
   }
 }
 
@@ -420,49 +407,24 @@ export async function updateSectionName(
 // CUSTOMERS
 // -------------------------------------------------------------
 export async function getCustomers(): Promise<Customer[]> {
-  // Read from Supabase first (single source of truth for all devices)
+  const local = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
-      if (!error && data && data.length > 0) {
-        setStored(STORAGE_KEYS.CUSTOMERS, data);
-        // Ensure every customer has proper Section 1=A, Section 2=B, Section 3=C ID
-        return (data as Customer[]).map((c, idx) => {
-          if (c.customer_code && /^[ABC]\d+$/i.test(c.customer_code)) {
-            return c;
-          }
-          const prefix = c.assigned_section_ids?.includes('sec-water-002')
-            ? 'B'
-            : c.assigned_section_ids?.includes('sec-other-003')
-            ? 'C'
-            : 'A';
-          return {
-            ...c,
-            customer_code: `${prefix}${idx + 1}`,
-          };
-        });
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', STORAGE_KEYS.CUSTOMERS)
+        .maybeSingle();
+      if (!error && data?.value && Array.isArray(data.value) && data.value.length > 0) {
+        setStored(STORAGE_KEYS.CUSTOMERS, data.value);
+        return data.value as Customer[];
       }
     } catch (e) {
       console.warn('Supabase getCustomers error:', e);
     }
   }
-  const loaded = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
-  // Ensure every customer has proper Section 1=A, Section 2=B, Section 3=C ID
-  return loaded.map((c, idx) => {
-    if (c.customer_code && /^[ABC]\d+$/i.test(c.customer_code)) {
-      return c;
-    }
-    const prefix = c.assigned_section_ids?.includes('sec-water-002')
-      ? 'B'
-      : c.assigned_section_ids?.includes('sec-other-003')
-      ? 'C'
-      : 'A';
-    return {
-      ...c,
-      customer_code: `${prefix}${idx + 1}`,
-    };
-  });
+  return local;
 }
 
 export async function getCustomerById(id: string): Promise<Customer | undefined> {
@@ -564,7 +526,7 @@ export async function createCustomer(
   });
 
   // Broadcast to all connected devices
-  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
 
   return newCustomer;
 }
@@ -756,7 +718,7 @@ export async function updateBillingPeriodCharges(
   });
 
   // Broadcast updated billing_periods to all connected devices
-  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
 
   return target;
 }
@@ -840,7 +802,7 @@ export async function updateRemainingDueDirectly(
   });
 
   // Broadcast to all connected devices
-  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
 
   return target;
 }
@@ -925,7 +887,7 @@ export async function updateLastMonthPaidDirectly(
     reason: reason || 'Directly edited last month paid entry',
   });
 
-  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
 
   return target;
 }
@@ -1152,7 +1114,7 @@ export async function addCollection(
   });
 
   // Broadcast updated billing_periods + collections to all connected devices
-  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS]);
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
 
   return newCollection;
 }
@@ -1231,7 +1193,7 @@ export async function updateCollection(
     reason: reason || 'Authorized payment modification',
   });
 
-  await broadcastDataSync([STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+  await broadcastDataSync([STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
 
   return target;
 }
@@ -1297,7 +1259,7 @@ export async function reverseCollection(
     reason,
   });
 
-  await broadcastDataSync([STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS, STORAGE_KEYS.REVERSALS]);
+  await broadcastDataSync([STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS, STORAGE_KEYS.REVERSALS], actor?.name);
 }
 
 // -------------------------------------------------------------
@@ -1350,12 +1312,24 @@ export async function saveCashReconciliation(
 // AUDIT LOGS
 // -------------------------------------------------------------
 export async function getAuditLogs(): Promise<AuditLog[]> {
+  const local = getStored<AuditLog[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
   const supabase = getSupabaseClient();
   if (supabase) {
-    const { data, error } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false });
-    if (!error && data) return data;
+    try {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', STORAGE_KEYS.AUDIT_LOGS)
+        .maybeSingle();
+      if (!error && data?.value && Array.isArray(data.value) && data.value.length > 0) {
+        setStored(STORAGE_KEYS.AUDIT_LOGS, data.value);
+        return data.value as AuditLog[];
+      }
+    } catch (e) {
+      console.warn('Supabase getAuditLogs error:', e);
+    }
   }
-  return getStored(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+  return local;
 }
 
 export async function addAuditLog(entry: Omit<AuditLog, 'id' | 'created_at'>): Promise<void> {
@@ -1366,11 +1340,14 @@ export async function addAuditLog(entry: Omit<AuditLog, 'id' | 'created_at'>): P
     created_at: new Date().toISOString(),
   };
   logs.unshift(newLog);
-  setStored(STORAGE_KEYS.AUDIT_LOGS, logs);
+  const trimmed = logs.slice(0, 500);
+  setStored(STORAGE_KEYS.AUDIT_LOGS, trimmed);
 
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    await supabase.from('audit_logs').insert(newLog);
+  try {
+    const { pushKeyToCloud } = await import('./syncService');
+    await pushKeyToCloud(STORAGE_KEYS.AUDIT_LOGS, trimmed, entry.actor_name);
+  } catch (e) {
+    console.warn('[Audit] Cloud push error:', e);
   }
 }
 
@@ -1451,7 +1428,7 @@ export async function autoCloseExpiredBillingPeriods(actor?: { id: string; name:
 
   if (changed) {
     setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
-    await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+    await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
   }
 
   return { closedCount };
@@ -1632,7 +1609,7 @@ export async function bulkImportSection1(rows: any[], actor: { id: string; name:
     }
   }
   await addAuditLog({ actor_user_id: actor.id, actor_name: actor.name, entity_type: 'section', entity_id: sectionId, action_type: 'CREATE', reason: 'Imported ' + created + ' records into Section 1 from Excel' });
-  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS]);
+  await broadcastDataSync([STORAGE_KEYS.CUSTOMERS, STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
   return { created };
 }
 

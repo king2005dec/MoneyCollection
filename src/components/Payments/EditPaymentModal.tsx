@@ -7,7 +7,7 @@ import { PaymentMethod } from '../../types';
 import { X, Pencil, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export const EditPaymentModal: React.FC = () => {
-  const { currentUser } = useAuth();
+  const { currentUser, isOwner } = useAuth();
   const { editPaymentModal, closeEditPaymentModal, triggerDbRefresh, showToast } = useApp();
   const collection = editPaymentModal.collection;
 
@@ -49,7 +49,7 @@ export const EditPaymentModal: React.FC = () => {
     try {
       const actor = {
         id: currentUser?.id || 'usr-owner-001',
-        name: currentUser?.full_name || 'Admin',
+        name: currentUser?.full_name || (isOwner ? 'Raj' : 'Staff'),
       };
 
       await updateCollection(

@@ -31,7 +31,7 @@ export const ReversePaymentModal: React.FC = () => {
     try {
       const actor = {
         id: currentUser?.id || 'usr-owner-001',
-        name: currentUser?.full_name || 'Owner',
+        name: currentUser?.full_name || (isOwner ? 'Raj' : 'Staff'),
       };
 
       await reverseCollection(collection.id, reason.trim(), actor);

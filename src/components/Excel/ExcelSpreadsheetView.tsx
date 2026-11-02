@@ -400,8 +400,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     field: 'closing_balance' | 'name' | 'this_month' | 'prev_balance' | 'current_unit' | 'prev_unit'
   ) => {
     const actor = {
-      id: currentUser?.id || 'usr-staff-001',
-      name: currentUser?.full_name || (isOwner ? 'Owner' : 'Staff Collector'),
+      id: currentUser?.id || (isOwner ? 'usr-owner-001' : 'usr-staff-001'),
+      name: currentUser?.full_name || (isOwner ? 'Raj' : (currentUser?.username || 'Staff')),
     };
 
     setSavingCell(true);
@@ -623,8 +623,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     setSavingModal(true);
     try {
       const actor = {
-        id: currentUser?.id || 'usr-staff-001',
-        name: currentUser?.full_name || (isOwner ? 'Owner' : 'Staff Collector'),
+        id: currentUser?.id || (isOwner ? 'usr-owner-001' : 'usr-staff-001'),
+        name: currentUser?.full_name || (isOwner ? 'Raj' : (currentUser?.username || 'Staff')),
       };
 
       const payNum = parseFloat(modalPayAmount);
@@ -666,8 +666,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   const handleUpiPaymentConfirmed = async (paidAmount: number, utr: string) => {
     if (!upiModalData) return;
     const actor = {
-      id: currentUser?.id || 'usr-staff-001',
-      name: currentUser?.full_name || (isOwner ? 'Owner' : 'Staff Collector'),
+      id: currentUser?.id || (isOwner ? 'usr-owner-001' : 'usr-staff-001'),
+      name: currentUser?.full_name || (isOwner ? 'Raj' : (currentUser?.username || 'Staff')),
     };
 
     const periodId = upiModalData.periodId || `bp-${upiModalData.customerId}-${upiModalData.sectionId}-${selectedMonth}-${selectedYear}`;
@@ -747,7 +747,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     try {
       const actor = {
         id: currentUser?.id || 'usr-owner-001',
-        name: currentUser?.full_name || 'Owner',
+        name: currentUser?.full_name || 'Raj',
       };
       await deleteCustomer(deleteConfirmRow.customer.id, actor);
       showToast(`Deleted resident ${deleteConfirmRow.name} (${deleteConfirmRow.customerCode}) from ledger.`);
@@ -782,7 +782,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     try {
       const actor = {
         id: currentUser?.id || 'usr-owner-001',
-        name: currentUser?.full_name || 'Owner',
+        name: currentUser?.full_name || 'Raj',
       };
 
       const result = await carryForwardMonth(
@@ -822,7 +822,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     try {
       const actor = {
         id: currentUser?.id || 'usr-owner-001',
-        name: currentUser?.full_name || 'Owner',
+        name: currentUser?.full_name || 'Raj',
       };
 
       const targetSecId = activeTab === 'all' ? 'sec-elec-001' : activeTab;
@@ -1123,7 +1123,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                     try {
                       const actor = {
                         id: currentUser?.id || 'usr-owner-001',
-                        name: currentUser?.full_name || 'Owner',
+                        name: currentUser?.full_name || 'Raj',
                       };
                       const result = await carryForwardMonth(m, y, prevM, prevY, 15, actor);
                       showUpdateToast(
