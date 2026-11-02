@@ -208,7 +208,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  // Multi-tab sync within same browser (localStorage storage event)
+  // Poll Supabase every 10s so all devices see each other's updates
+  useEffect(() => {
+    const interval = setInterval(() => {
+      triggerDbRefresh();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key && e.key.startsWith('col_db_')) {
