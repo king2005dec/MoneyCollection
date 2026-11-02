@@ -1,20 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { CollectionSection, Customer, Collection, BillingPeriod, AuditLog } from '../types';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { CollectionSection, Customer, Collection } from '../types';
 import { getSections, initLocalDatabase, setBroadcastSender, scheduleBalanceMonitor, importOctober26Data } from '../services/databaseService';
-import { getSupabaseClient } from '../services/supabaseClient';
-
-// Keys to sync over broadcast
-const SYNC_STORAGE_KEYS = {
-  BILLING_PERIODS: 'col_db_billing_periods_v6',
-  COLLECTIONS: 'col_db_collections_v6',
-  AUDIT_LOGS: 'col_db_audit_logs_v1',
-  CUSTOMERS: 'col_db_customers_v6',
-  REVERSALS: 'col_db_reversals_v1',
-  PROFILES: 'col_db_profiles_v1',
-  SECTIONS: 'col_db_sections_v2',
-  SETTINGS: 'col_db_settings_v1',
-  CASH_RECONCILIATION: 'col_db_cash_recon_v1',
-};
+import { initSync } from '../services/syncService';
 
 export type NavPage =
   | 'dashboard'
@@ -146,110 +133,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setDbVersion(v => v + 1);
   };
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // REAL-TIME SYNC via Supabase Broadcast Channel
-  // Works even if Supabase DB schema has wrong column types.
-  // When any user saves a payment/balance update:
-  //   1. Their app saves to localStorage
-  //   2. Broadcasts the updated data over Supabase Broadcast
-  //   3. ALL other devices receive the payload and write it to their localStorage
-  //   4. triggerDbRefresh() causes them to re-render with the new data
-  // ────────────────────────────────────────────────────────────────────────────
-  const supabaseBroadcastRef = useRef<any>(null);
-
+  // ─── REAL-TIME CROSS-DEVICE SYNC ─────────────────────────────────────────────
+  // Uses syncService which handles:
+  //   • Supabase Broadcast (instant push to all devices)
+  //   • Supabase DB pull on connect (get existing data)
+  //   • State request/response (new device gets full snapshot from online peers)
+  //   • 30-second periodic DB poll (catch any missed updates)
+  //   • localStorage storage event (same-browser tabs)
   useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-
-    try {
-      const channel = supabase
-        .channel('money_collection_broadcast_v2', {
-          config: { broadcast: { self: false } }, // don't echo to sender
-        })
-        .on(
-          'broadcast',
-          { event: 'data_sync' },
-          (payload: { payload?: { key?: string; data?: unknown } }) => {
-            // Receive data from another device and write to our localStorage
-            const { key, data } = payload?.payload || {};
-            if (key && data) {
-              try {
-                localStorage.setItem(key, JSON.stringify(data));
-              } catch (e) {
-                console.warn('Failed to apply synced data:', e);
-              }
-            }
-            triggerDbRefresh();
-          }
-        )
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            supabaseBroadcastRef.current = channel;
-            console.log('[Sync] Connected to Supabase broadcast channel');
-
-            // Wire up the sender in databaseService so it can push data here
-            setBroadcastSender(async (key: string, data: unknown) => {
-              await (channel as any).send({
-                type: 'broadcast',
-                event: 'data_sync',
-                payload: { key, data },
-              });
-            });
-          }
-        });
-
-      return () => {
-        setBroadcastSender(null); // detach sender
-        supabase.removeChannel(channel);
-        supabaseBroadcastRef.current = null;
-      };
-    } catch (err) {
-      console.warn('Realtime broadcast subscribe error:', err);
-    }
-  }, []);
-
-  // Poll Supabase every 10s so all devices see each other's updates
-  useEffect(() => {
-    const interval = setInterval(() => {
-      triggerDbRefresh();
-    }, 10000);
-    return () => clearInterval(interval);
-  }, []);
-  useEffect(() => {
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key && e.key.startsWith('col_db_')) {
-        triggerDbRefresh();
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, []);
-
-  // BroadcastChannel listener for same-tab sync from notifySync()
-  useEffect(() => {
-    const bc = typeof window !== 'undefined' && 'BroadcastChannel' in window
-      ? new BroadcastChannel('money_collection_live_sync')
-      : null;
-    if (bc) {
-      const handleMessage = (e: MessageEvent) => {
-        if (e.data?.key && String(e.data.key).startsWith('col_db_')) {
-          // Write received data to our localStorage (cross-tab / same-browser sync)
-          if (e.data.data !== undefined) {
-            try {
-              localStorage.setItem(e.data.key, JSON.stringify(e.data.data));
-            } catch (err) {
-              console.warn('Failed to write synced data to localStorage:', err);
-            }
-          }
-          triggerDbRefresh();
-        }
-      };
-      bc.addEventListener('message', handleMessage);
-      return () => {
-        bc.removeEventListener('message', handleMessage);
-        bc.close();
-      };
-    }
+    const cleanup = initSync(() => triggerDbRefresh());
+    // Wire broadcast sender for databaseService writes
+    setBroadcastSender(null); // syncService handles broadcast internally now
+    return cleanup;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openCustomerProfile = (customerId: string, fromSection?: string) => {
