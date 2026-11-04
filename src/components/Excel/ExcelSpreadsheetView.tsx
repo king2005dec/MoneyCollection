@@ -468,23 +468,64 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             setEditingCell(null);
             return;
           }
-          const periodId = `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
-          await addCollection(
-            {
-              customer_id: customerId,
-              section_id: sectionId,
-              billing_period_id: periodId,
-              amount: payVal,
-              payment_method: 'Cash',
-              notes: 'Payment directly entered by Owner in spreadsheet',
-              collection_date: new Date().toISOString().slice(0, 10),
-              collection_time: new Date().toTimeString().slice(0, 8),
-              created_by: actor.id,
-              created_by_name: actor.name,
-            },
-            actor
+          const targetPeriod = billingPeriods.find(
+            p => p.customer_id === customerId &&
+                 p.section_id === sectionId &&
+                 p.billing_month === selectedMonth &&
+                 p.billing_year === selectedYear
           );
-          showUpdateToast(`Recorded payment of ${formatCurrency(payVal)}!`);
+          if (targetPeriod) {
+            const oldPaid = targetPeriod.paid_amount || 0;
+            const diff = payVal - oldPaid;
+
+            // Direct update of period paid_amount.
+            // If staff entered 1000 by mistake and actual was 800,
+            // owner changes to 800 -> closing_balance automatically becomes total_due - 800 (+200 restored)
+            await updateBillingPeriodCharges(
+              targetPeriod.id,
+              { paid_amount: payVal },
+              `Owner corrected paid amount from ${formatCurrency(oldPaid)} to ${formatCurrency(payVal)}`,
+              actor
+            );
+
+            // Record correction in collections list for audit history
+            if (diff !== 0) {
+              const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+              collections.unshift({
+                id: `col-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substr(2, 4)}`,
+                receipt_number: `RCP-CORR-${Date.now().toString().slice(-6)}`,
+                customer_id: customerId,
+                section_id: sectionId,
+                billing_period_id: targetPeriod.id,
+                amount: diff,
+                payment_method: 'Cash',
+                status: 'Confirmed',
+                notes: `Owner corrected payment from ₹${oldPaid} to ₹${payVal}`,
+                collection_date: new Date().toISOString().slice(0, 10),
+                collection_time: new Date().toTimeString().slice(0, 8),
+                sync_device: 'browser',
+                sync_device_info: 'Owner direct edit',
+                sync_timestamp: new Date().toISOString(),
+                created_by: actor.id,
+                created_by_name: actor.name,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              });
+              setStored(STORAGE_KEYS.COLLECTIONS, collections);
+              await broadcastDataSync([STORAGE_KEYS.COLLECTIONS], actor.name);
+            }
+
+            showUpdateToast(`Updated paid amount to ${formatCurrency(payVal)}! Current balance adjusted.`);
+          } else {
+            const periodId = `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
+            await updateBillingPeriodCharges(
+              periodId,
+              { paid_amount: payVal },
+              `Owner set paid amount to ${formatCurrency(payVal)}`,
+              actor
+            );
+            showUpdateToast(`Set paid amount to ${formatCurrency(payVal)}!`);
+          }
         }
         } else if (field === 'closing_balance') {
         // Staff or Owner updating remaining balance directly
@@ -644,13 +685,29 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                  p.billing_year === selectedYear
           );
           if (targetPeriod) {
+            const curU = targetPeriod.current_unit || 0;
+            const consumed = Math.max(0, curU - numVal);
+            
+            let newBill = 0;
+            if (curU > 0 || numVal > 0) {
+              if (consumed <= 79) {
+                newBill = consumed > 0 ? (consumed * 15) + 400 : 0;
+              } else {
+                newBill = consumed * 20;
+              }
+            }
+
             await updateBillingPeriodCharges(
               targetPeriod.id,
-              { previous_unit: numVal },
-              `Owner updated previous meter unit to ${numVal}`,
+              {
+                previous_unit: numVal,
+                units_consumed: consumed,
+                bill_amount: newBill,
+              },
+              `Owner updated previous meter unit to ${numVal} (Consumed: ${consumed} units → Bill: ${formatCurrency(newBill)})`,
               actor
             );
-            showUpdateToast(`Updated previous unit to ${numVal}`);
+            showUpdateToast(`Updated previous unit to ${numVal} (Consumed: ${consumed} units → Bill: ${formatCurrency(newBill)})`);
           }
         }
       }

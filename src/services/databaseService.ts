@@ -688,9 +688,15 @@ export async function updateBillingPeriodCharges(
     target.closing_balance = charges.closing_balance;
     target.total_amount_due = Number((target.paid_amount + target.closing_balance).toFixed(2));
   } else if (charges.bill_amount !== undefined || charges.opening_balance !== undefined || charges.additional_charges !== undefined || charges.credits_or_adjustments !== undefined || charges.paid_amount !== undefined) {
-    // Recalculate totals only if bill-related fields changed
-    target.total_amount_due = Number((target.opening_balance + target.bill_amount + target.additional_charges - target.credits_or_adjustments).toFixed(2));
-    target.closing_balance = Number((target.total_amount_due - target.paid_amount).toFixed(2));
+    // Recalculate totals when bill, balance, or paid amount changes
+    const baseDue = Number((target.opening_balance + target.bill_amount + target.additional_charges - target.credits_or_adjustments).toFixed(2));
+    if (target.paid_amount > baseDue) {
+      target.total_amount_due = target.paid_amount;
+      target.closing_balance = 0;
+    } else {
+      target.total_amount_due = baseDue;
+      target.closing_balance = Number(Math.max(0, baseDue - target.paid_amount).toFixed(2));
+    }
   }
   // If only current_unit/previous_unit changed, don't touch closing_balance or total_amount_due
 
