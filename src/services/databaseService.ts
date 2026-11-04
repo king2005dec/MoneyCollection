@@ -1178,22 +1178,22 @@ export async function addCollection(
   // Broadcast updated billing_periods + collections to all connected devices
   await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
 
-  if (targetPeriod) {
+  if (period) {
     try {
       await addLedgerHistoryEntry({
         customer_id: newCollection.customer_id,
         section_id: newCollection.section_id,
-        current_unit: targetPeriod.current_unit ?? 0,
-        prev_unit: targetPeriod.previous_unit ?? 0,
-        units_consumed: targetPeriod.units_consumed ?? 0,
-        bill_amount: targetPeriod.bill_amount,
-        opening_balance: targetPeriod.opening_balance,
-        total_amount_due: targetPeriod.total_amount_due,
-        paid_amount: targetPeriod.paid_amount,
+        current_unit: period.current_unit ?? 0,
+        prev_unit: period.previous_unit ?? 0,
+        units_consumed: period.units_consumed ?? 0,
+        bill_amount: period.bill_amount,
+        opening_balance: period.opening_balance,
+        total_amount_due: period.total_amount_due,
+        paid_amount: period.paid_amount,
         payment_method: newCollection.payment_method || 'Cash',
-        closing_balance: targetPeriod.closing_balance,
-        billing_month: targetPeriod.billing_month,
-        billing_year: targetPeriod.billing_year,
+        closing_balance: period.closing_balance,
+        billing_month: period.billing_month,
+        billing_year: period.billing_year,
         notes: `Payment of ₹${newCollection.amount} (${newCollection.payment_method})`,
         actor_name: actor.name,
       });
