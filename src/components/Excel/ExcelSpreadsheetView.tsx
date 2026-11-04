@@ -113,11 +113,14 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     const endM = selectedMonth === 12 ? 1 : selectedMonth + 1;
     const endY = selectedMonth === 12 ? selectedYear + 1 : selectedYear;
 
+    // Billing cycle: Starts 5th of selected month, ends 4th of next month
+    // On the 5th, cycle resets to the new month cycle!
     const startStr = `05/${String(startM).padStart(2, '0')}/${startY}`;
-    const endStr = `05/${String(endM).padStart(2, '0')}/${endY}`;
+    const endStr = `04/${String(endM).padStart(2, '0')}/${endY}`;
 
     const now = new Date();
-    const endCycleDate = new Date(endY, endM - 1, 5, 23, 59, 59);
+    // End target is 4th of endM, endY at 23:59:59
+    const endCycleDate = new Date(endY, endM - 1, 4, 23, 59, 59);
     const diffMs = endCycleDate.getTime() - now.getTime();
     const remainingDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
@@ -1314,11 +1317,11 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             {cycleDates.remainingDays > 0
               ? `remeding day ${cycleDates.remainingDays}`
               : cycleDates.remainingDays === 0
-              ? 'ending today (5th)!'
+              ? 'ending today (4th)!'
               : `ended ${Math.abs(cycleDates.remainingDays)} days ago`}
           </span>
           <span className="text-[11px] text-slate-500 font-medium">
-            (5th to 5th monthly cycle • Real-time)
+            (5th to 4th monthly cycle • Real-time)
           </span>
         </div>
       </div>
