@@ -15,6 +15,7 @@ import {
   getSections,
   updateBillingPeriodCharges,
   updateRemainingDueDirectly,
+  updateOwnerPaymentDirectly,
   addCollection,
   createCustomer,
   updateCustomer,
@@ -54,7 +55,15 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
   onClose,
 }) => {
   const { isOwner, currentUser } = useAuth();
-  const { dbVersion, triggerDbRefresh, showToast } = useApp();
+  const {
+    dbVersion,
+    triggerDbRefresh,
+    showToast,
+    currentBillingMonth,
+    setCurrentBillingMonth,
+    currentBillingYear,
+    setCurrentBillingYear,
+  } = useApp();
 
   // Device timestamp helper for update confirmations (stored update time, not live)
   const deviceTimeStr = () => {
@@ -98,8 +107,10 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
   const [pendingAbove499, setPendingAbove499] = useState<boolean>(initialPendingOnly);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedMonth, setSelectedMonth] = useState<number>(10);
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const selectedMonth = currentBillingMonth;
+  const setSelectedMonth = setCurrentBillingMonth;
+  const selectedYear = currentBillingYear;
+  const setSelectedYear = setCurrentBillingYear;
   const [currentTimeTicker, setCurrentTimeTicker] = useState<number>(Date.now());
 
   useEffect(() => {
@@ -468,36 +479,21 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             setEditingCell(null);
             return;
           }
-          const targetPeriod = billingPeriods.find(
-            p => p.customer_id === customerId &&
-                 p.section_id === sectionId &&
-                 p.billing_month === selectedMonth &&
-                 p.billing_year === selectedYear
+
+          // Direct update of period paid_amount and collections.
+          // If staff entered 1000 by mistake and actual was 800:
+          // Owner changes to 800 -> closing_balance automatically restores +200 remaining balance,
+          // and collections array updates so Dashboard metrics immediately reflect the change!
+          await updateOwnerPaymentDirectly(
+            customerId,
+            sectionId,
+            selectedMonth,
+            selectedYear,
+            payVal,
+            actor
           );
-          if (targetPeriod) {
-            const oldPaid = targetPeriod.paid_amount || 0;
 
-            // Direct update of period paid_amount.
-            // If staff entered 1000 by mistake and actual was 800,
-            // owner changes to 800 -> closing_balance automatically becomes total_due - 800 (+200 restored)
-            await updateBillingPeriodCharges(
-              targetPeriod.id,
-              { paid_amount: payVal },
-              `Owner corrected paid amount from ${formatCurrency(oldPaid)} to ${formatCurrency(payVal)}`,
-              actor
-            );
-
-            showUpdateToast(`Updated paid amount to ${formatCurrency(payVal)}! Current balance adjusted.`);
-          } else {
-            const periodId = `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
-            await updateBillingPeriodCharges(
-              periodId,
-              { paid_amount: payVal },
-              `Owner set paid amount to ${formatCurrency(payVal)}`,
-              actor
-            );
-            showUpdateToast(`Set paid amount to ${formatCurrency(payVal)}!`);
-          }
+          showUpdateToast(`Updated paid amount to ${formatCurrency(payVal)}! Remaining balance & Dashboard updated.`);
         }
         } else if (field === 'closing_balance') {
         // Staff or Owner updating remaining balance directly

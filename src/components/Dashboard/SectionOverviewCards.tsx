@@ -8,21 +8,27 @@ interface SectionOverviewCardsProps {
   sections: CollectionSection[];
   customers: Customer[];
   billingPeriods: BillingPeriod[];
+  selectedMonth?: number;
+  selectedYear?: number;
 }
 
 export const SectionOverviewCards: React.FC<SectionOverviewCardsProps> = ({
   sections,
   customers,
   billingPeriods,
+  selectedMonth,
+  selectedYear,
 }) => {
   const { setActivePage } = useApp();
 
-  // Use active/latest month's periods dynamically
-  const latestPeriod = billingPeriods.length > 0 
-    ? [...billingPeriods].sort((a, b) => ((b.billing_year || 2026) * 100 + (b.billing_month || 1)) - ((a.billing_year || 2026) * 100 + (a.billing_month || 1)))[0]
-    : null;
-  const activeMonth = latestPeriod ? (latestPeriod.billing_month || 10) : 10;
-  const activeYear = latestPeriod ? (latestPeriod.billing_year || 2026) : 2026;
+  // Use provided selected month or fallback to active month with data
+  const periodsWithData = billingPeriods.filter(p => (p.bill_amount && p.bill_amount > 0) || (p.paid_amount && p.paid_amount > 0) || (p.closing_balance && p.closing_balance > 0));
+  const pool = periodsWithData.length > 0 ? periodsWithData : billingPeriods;
+  const sortedPeriods = [...pool].sort((a, b) => ((b.billing_year || 2026) * 100 + (b.billing_month || 1)) - ((a.billing_year || 2026) * 100 + (a.billing_month || 1)));
+  const latestPeriod = sortedPeriods[0] || null;
+
+  const activeMonth = selectedMonth || (latestPeriod ? (latestPeriod.billing_month || 10) : 10);
+  const activeYear = selectedYear || (latestPeriod ? (latestPeriod.billing_year || 2026) : 2026);
   const currentMonthPeriods = billingPeriods.filter(p => p.billing_month === activeMonth && p.billing_year === activeYear);
 
   const getSectionStats = (sectionId: string) => {

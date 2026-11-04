@@ -689,8 +689,9 @@ export async function updateBillingPeriodCharges(
     target.total_amount_due = Number((target.paid_amount + target.closing_balance).toFixed(2));
   } else if (charges.bill_amount !== undefined || charges.opening_balance !== undefined || charges.additional_charges !== undefined || charges.credits_or_adjustments !== undefined || charges.paid_amount !== undefined) {
     // Recalculate totals when bill, balance, or paid amount changes
-    const baseDue = Number((target.opening_balance + target.bill_amount + target.additional_charges - target.credits_or_adjustments).toFixed(2));
-    if (target.paid_amount > baseDue) {
+    const rawDue = Number(((target.opening_balance || 0) + (target.bill_amount || 0) + (target.additional_charges || 0) - (target.credits_or_adjustments || 0)).toFixed(2));
+    const baseDue = rawDue > 0 ? rawDue : (target.total_amount_due > 0 ? target.total_amount_due : Number(((target.paid_amount || 0) + (target.closing_balance || 0)).toFixed(2)));
+    if (target.paid_amount >= baseDue) {
       target.total_amount_due = target.paid_amount;
       target.closing_balance = 0;
     } else {
@@ -707,6 +708,70 @@ export async function updateBillingPeriodCharges(
   target.updated_at = new Date().toISOString();
 
   setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
+
+  // If paid_amount was updated, also synchronize collections array
+  if (charges.paid_amount !== undefined) {
+    try {
+      const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+      const matchingCols = collections.filter(
+        c => c.status !== 'Reversed' && (
+          c.billing_period_id === target.id ||
+          (c.customer_id === target.customer_id && c.section_id === target.section_id)
+        )
+      );
+
+      const now = new Date();
+      const dateStr = now.toISOString().slice(0, 10);
+      const timeStr = now.toLocaleTimeString('en-US', { hour12: false });
+
+      if (matchingCols.length > 0) {
+        if (charges.paid_amount === 0) {
+          matchingCols.forEach(c => {
+            c.amount = 0;
+            c.status = 'Corrected';
+            c.notes = `Payment cleared to ₹0 (${actor.name})`;
+            c.updated_by = actor.id;
+            c.updated_by_name = actor.name;
+            c.updated_at = now.toISOString();
+          });
+        } else {
+          const otherSum = matchingCols.slice(1).reduce((s, c) => s + c.amount, 0);
+          const primaryCol = matchingCols[0];
+          primaryCol.amount = Math.max(0, Number((charges.paid_amount - otherSum).toFixed(2)));
+          primaryCol.status = 'Confirmed';
+          primaryCol.notes = `Payment adjusted to ₹${charges.paid_amount} (${actor.name})`;
+          primaryCol.updated_by = actor.id;
+          primaryCol.updated_by_name = actor.name;
+          primaryCol.updated_at = now.toISOString();
+        }
+      } else if (charges.paid_amount > 0) {
+        const receipt_number = `RCP-${dateStr.replace(/-/g, '')}-${1000 + collections.length + 1}`;
+        collections.unshift({
+          id: `col-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substr(2, 4)}`,
+          receipt_number,
+          customer_id: target.customer_id,
+          section_id: target.section_id,
+          billing_period_id: target.id,
+          amount: charges.paid_amount,
+          payment_method: 'Cash',
+          status: 'Confirmed',
+          collection_date: dateStr,
+          collection_time: timeStr,
+          notes: `Payment recorded via charges update (${actor.name})`,
+          sync_device: device,
+          sync_device_info: device_info,
+          sync_timestamp: timestamp,
+          created_by: actor.id,
+          created_by_name: actor.name,
+          created_at: now.toISOString(),
+          updated_at: now.toISOString(),
+        });
+      }
+      setStored(STORAGE_KEYS.COLLECTIONS, collections);
+    } catch (e) {
+      console.warn('Failed to sync collection on charges update:', e);
+    }
+  }
 
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -732,8 +797,11 @@ export async function updateBillingPeriodCharges(
     reason: reason || 'Updated monthly bill charges & balances',
   });
 
-  // Broadcast updated billing_periods to all connected devices
-  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
+  // Broadcast updated billing_periods (and collections if paid_amount was changed) to all connected devices
+  const keysToSync = charges.paid_amount !== undefined
+    ? [STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS]
+    : [STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS];
+  await broadcastDataSync(keysToSync, actor?.name);
 
   try {
     await addLedgerHistoryEntry({
@@ -756,6 +824,179 @@ export async function updateBillingPeriodCharges(
   } catch (err) {
     console.warn('Failed to record ledger history entry:', err);
   }
+
+  return target;
+}
+
+export async function updateOwnerPaymentDirectly(
+  customerId: string,
+  sectionId: string,
+  month: number,
+  year: number,
+  newPayAmount: number,
+  actor: { id: string; name: string }
+): Promise<BillingPeriod> {
+  const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
+  let target = periods.find(
+    p => p.customer_id === customerId &&
+         p.section_id === sectionId &&
+         p.billing_month === month &&
+         p.billing_year === year
+  );
+
+  const { device, device_info, timestamp } = getDeviceInfo();
+  const safePay = Math.max(0, Number(newPayAmount.toFixed(2)));
+
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const timeStr = now.toLocaleTimeString('en-US', { hour12: false });
+
+  if (!target) {
+    const periodId = `bp-${customerId}-${sectionId}-${month}-${year}`;
+    target = {
+      id: periodId,
+      customer_id: customerId,
+      section_id: sectionId,
+      billing_month: month,
+      billing_year: year,
+      opening_balance: 0,
+      bill_amount: safePay,
+      additional_charges: 0,
+      credits_or_adjustments: 0,
+      total_amount_due: safePay,
+      paid_amount: safePay,
+      closing_balance: 0,
+      due_date: `${year}-${String(month).padStart(2, '0')}-05`,
+      payment_status: 'Paid',
+      sync_device: device,
+      sync_device_info: device_info,
+      sync_timestamp: timestamp,
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    };
+    periods.push(target);
+  } else {
+    const prevPaid = target.paid_amount || 0;
+    const rawDue = Number(((target.opening_balance || 0) + (target.bill_amount || 0) + (target.additional_charges || 0) - (target.credits_or_adjustments || 0)).toFixed(2));
+    const baseDue = rawDue > 0
+      ? rawDue
+      : (target.total_amount_due > 0 ? target.total_amount_due : Number(((prevPaid || 0) + (target.closing_balance || 0)).toFixed(2)));
+
+    target.paid_amount = safePay;
+    if (safePay >= baseDue) {
+      target.total_amount_due = safePay;
+      target.closing_balance = 0;
+    } else {
+      target.total_amount_due = baseDue;
+      target.closing_balance = Number(Math.max(0, baseDue - safePay).toFixed(2));
+    }
+
+    target.payment_status = computePaymentStatus(target.total_amount_due, target.paid_amount, target.due_date);
+    target.sync_device = device;
+    target.sync_device_info = device_info;
+    target.sync_timestamp = timestamp;
+    target.updated_at = now.toISOString();
+  }
+
+  setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
+
+  // Synchronize collections array
+  const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+  const matchingCols = collections.filter(
+    c => c.status !== 'Reversed' && (
+      c.billing_period_id === target!.id ||
+      (c.customer_id === customerId && c.section_id === sectionId)
+    )
+  );
+
+  if (matchingCols.length > 0) {
+    if (safePay === 0) {
+      matchingCols.forEach(c => {
+        c.amount = 0;
+        c.status = 'Corrected';
+        c.notes = `Owner reset payment to ₹0 (${actor.name})`;
+        c.updated_by = actor.id;
+        c.updated_by_name = actor.name;
+        c.updated_at = now.toISOString();
+      });
+    } else {
+      const otherSum = matchingCols.slice(1).reduce((s, c) => s + c.amount, 0);
+      const primaryCol = matchingCols[0];
+      primaryCol.amount = Math.max(0, Number((safePay - otherSum).toFixed(2)));
+      primaryCol.status = 'Confirmed';
+      primaryCol.notes = `Owner corrected payment to ₹${safePay} (${actor.name})`;
+      primaryCol.updated_by = actor.id;
+      primaryCol.updated_by_name = actor.name;
+      primaryCol.updated_at = now.toISOString();
+      primaryCol.collection_date = primaryCol.collection_date || dateStr;
+    }
+  } else if (safePay > 0) {
+    const receipt_number = `RCP-${dateStr.replace(/-/g, '')}-${1000 + collections.length + 1}`;
+    const newCollection: Collection = {
+      id: `col-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substr(2, 4)}`,
+      receipt_number,
+      customer_id: customerId,
+      section_id: sectionId,
+      billing_period_id: target.id,
+      amount: safePay,
+      payment_method: 'Cash',
+      status: 'Confirmed',
+      collection_date: dateStr,
+      collection_time: timeStr,
+      notes: `Payment entered directly by Owner (${actor.name})`,
+      sync_device: device,
+      sync_device_info: device_info,
+      sync_timestamp: timestamp,
+      created_by: actor.id,
+      created_by_name: actor.name,
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    };
+    collections.unshift(newCollection);
+  }
+
+  setStored(STORAGE_KEYS.COLLECTIONS, collections);
+
+  // Broadcast to all connected devices and Supabase cloud
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS], actor.name);
+
+  // Ledger history entry for 2nd sheet
+  try {
+    await addLedgerHistoryEntry({
+      customer_id: target.customer_id,
+      section_id: target.section_id,
+      current_unit: target.current_unit ?? 0,
+      prev_unit: target.previous_unit ?? 0,
+      units_consumed: target.units_consumed ?? 0,
+      bill_amount: target.bill_amount,
+      opening_balance: target.opening_balance,
+      total_amount_due: target.total_amount_due,
+      paid_amount: target.paid_amount,
+      payment_method: matchingCols[0]?.payment_method || 'Cash',
+      closing_balance: target.closing_balance,
+      billing_month: target.billing_month,
+      billing_year: target.billing_year,
+      notes: `Owner modified paid amount to ₹${safePay}. Remaining balance: ₹${target.closing_balance}`,
+      actor_name: actor.name,
+    });
+  } catch (err) {
+    console.warn('Failed to record ledger history entry:', err);
+  }
+
+  // Audit log
+  await addAuditLog({
+    actor_user_id: actor.id,
+    actor_name: actor.name,
+    entity_type: 'billing_period',
+    entity_id: target.id,
+    action_type: 'UPDATE',
+    new_values: {
+      paid_amount: target.paid_amount,
+      closing_balance: target.closing_balance,
+      total_amount_due: target.total_amount_due,
+    },
+    reason: `Owner modified paid amount to ₹${safePay} (Remaining due: ₹${target.closing_balance})`,
+  });
 
   return target;
 }
@@ -1581,22 +1822,24 @@ export async function updateSystemSettings(
 // -------------------------------------------------------------
 // DASHBOARD METRICS CALCULATION (From actual database records)
 // -------------------------------------------------------------
-export async function getDashboardMetrics(): Promise<DashboardMetrics> {
+export async function getDashboardMetrics(targetMonth?: number, targetYear?: number): Promise<DashboardMetrics> {
   const periods = await getBillingPeriods();
   const collections = await getCollections();
   const customers = await getCustomers();
 
-  // Find the active/latest billing month/year that has data
-  let currentMonth = 10;
-  let currentYear = 2026;
-  if (periods.length > 0) {
-    const sorted = [...periods].sort((a, b) => {
+  let currentMonth = targetMonth || 10;
+  let currentYear = targetYear || 2026;
+  if (!targetMonth && periods.length > 0) {
+    // Pick the month that has active records with bills/dues/payments
+    const periodsWithBills = periods.filter(p => (p.bill_amount && p.bill_amount > 0) || (p.paid_amount && p.paid_amount > 0) || (p.closing_balance && p.closing_balance > 0));
+    const pool = periodsWithBills.length > 0 ? periodsWithBills : periods;
+    const sorted = [...pool].sort((a, b) => {
       const scoreA = (a.billing_year || 2026) * 100 + (a.billing_month || 1);
       const scoreB = (b.billing_year || 2026) * 100 + (b.billing_month || 1);
       return scoreB - scoreA;
     });
-    currentMonth = sorted[0].billing_month || 10;
-    currentYear = sorted[0].billing_year || 2026;
+    currentMonth = sorted[0]?.billing_month || 10;
+    currentYear = sorted[0]?.billing_year || 2026;
   }
 
   const today = new Date();
@@ -1626,11 +1869,13 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     .filter(c => c.collection_date === todayUtc || c.collection_date === todayLocal)
     .reduce((sum, c) => sum + c.amount, 0);
 
-  // Current month collections (matches active month or current calendar month)
+  // Current month collections (matches active month, cycle periods, or current calendar month)
   const activeMonthPrefix = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
   const calMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  const currentPeriodIds = new Set(currentMonthPeriods.map(p => p.id));
   
   const currentMonthCols = confirmedCols.filter(c => {
+    if (c.billing_period_id && currentPeriodIds.has(c.billing_period_id)) return true;
     if (!c.collection_date) return false;
     return c.collection_date.startsWith(activeMonthPrefix) || c.collection_date.startsWith(calMonthPrefix);
   });

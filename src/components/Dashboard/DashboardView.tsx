@@ -41,6 +41,10 @@ export const DashboardView: React.FC = () => {
   const { isOwner, currentUser } = useAuth();
   const {
     dbVersion,
+    currentBillingMonth,
+    setCurrentBillingMonth,
+    currentBillingYear,
+    setCurrentBillingYear,
     openPaymentModal,
     openEditPaymentModal,
     openReversePaymentModal,
@@ -70,7 +74,7 @@ export const DashboardView: React.FC = () => {
     setLoading(true);
     try {
       const [m, cols, custs, periods, secs, profs] = await Promise.all([
-        getDashboardMetrics(),
+        getDashboardMetrics(currentBillingMonth, currentBillingYear),
         getCollections(),
         getCustomers(),
         getBillingPeriods(),
@@ -92,7 +96,7 @@ export const DashboardView: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, [dbVersion]);
+  }, [dbVersion, currentBillingMonth, currentBillingYear]);
 
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
@@ -119,12 +123,13 @@ export const DashboardView: React.FC = () => {
     if (selectedMethodFilter !== 'all' && col.payment_method !== selectedMethodFilter) return false;
 
     const today = new Date().toISOString().slice(0, 10);
+    const todayLocal = new Date().toLocaleDateString('en-CA');
     const colDate = col.collection_date ? col.collection_date.slice(0, 10) : '';
 
     // Days filter: last N days
     if (selectedDaysFilter !== 'all' && colDate) {
       if (selectedDaysFilter === 'today') {
-        if (colDate !== today) return false;
+        if (colDate !== today && colDate !== todayLocal) return false;
       } else if (selectedDaysFilter === 'yesterday') {
         const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
         if (colDate !== yest) return false;
@@ -139,7 +144,7 @@ export const DashboardView: React.FC = () => {
       }
     }
     const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    if (dateFilter === 'today' && col.collection_date !== today) return false;
+    if (dateFilter === 'today' && col.collection_date !== today && col.collection_date !== todayLocal) return false;
     if (dateFilter === 'yesterday' && col.collection_date !== yest) return false;
 
     const cust = customers.find(c => c.id === col.customer_id);
@@ -165,9 +170,29 @@ export const DashboardView: React.FC = () => {
       {/* Top Banner & Date Filter Bar */}
       <div className="bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-            Billing & Collection Control Centre
-          </h1>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+              Billing & Collection Control Centre
+            </h1>
+            {/* Cycle Selector */}
+            <div className="flex items-center gap-1.5 bg-purple-50 border border-purple-200/90 px-2.5 py-1 rounded-lg">
+              <span className="text-[11px] font-bold text-purple-900">Cycle:</span>
+              <select
+                value={`${currentBillingMonth}-${currentBillingYear}`}
+                onChange={e => {
+                  const [m, y] = e.target.value.split('-').map(Number);
+                  setCurrentBillingMonth(m);
+                  setCurrentBillingYear(y);
+                }}
+                className="text-xs bg-white border border-purple-200 rounded px-1.5 py-0.5 text-purple-950 font-extrabold focus:outline-purple-500 cursor-pointer shadow-2xs"
+              >
+                <option value="10-2026">October 2026 (05/10 - 04/11)</option>
+                <option value="11-2026">November 2026 (05/11 - 04/12)</option>
+                <option value="12-2026">December 2026 (05/12 - 04/01)</option>
+                <option value="1-2027">January 2027 (05/01 - 04/02)</option>
+              </select>
+            </div>
+          </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
             Real-time verified collections for electricity, water, and society dues • Indore Jurisdiction
           </p>
@@ -239,6 +264,8 @@ export const DashboardView: React.FC = () => {
           sections={sections}
           customers={customers}
           billingPeriods={billingPeriods}
+          selectedMonth={currentBillingMonth}
+          selectedYear={currentBillingYear}
         />
       </div>
 

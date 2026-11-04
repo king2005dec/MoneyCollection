@@ -58,6 +58,10 @@ interface AppContextType {
   refreshSections: () => Promise<void>;
   dbVersion: number;
   triggerDbRefresh: () => void;
+  currentBillingMonth: number;
+  setCurrentBillingMonth: (m: number) => void;
+  currentBillingYear: number;
+  setCurrentBillingYear: (y: number) => void;
   
   // Modals
   paymentModal: PaymentModalProps;
@@ -93,6 +97,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [returnSectionPage, setReturnSectionPage] = useState<string | null>(null);
   const [sections, setSections] = useState<CollectionSection[]>([]);
   const [dbVersion, setDbVersion] = useState<number>(0);
+  const [currentBillingMonth, setCurrentBillingMonth] = useState<number>(10);
+  const [currentBillingYear, setCurrentBillingYear] = useState<number>(2026);
 
   // Modals state
   const [paymentModal, setPaymentModal] = useState<PaymentModalProps>({ isOpen: false });
@@ -210,6 +216,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshSections,
         dbVersion,
         triggerDbRefresh,
+        currentBillingMonth,
+        setCurrentBillingMonth,
+        currentBillingYear,
+        setCurrentBillingYear,
         paymentModal,
         openPaymentModal,
         closePaymentModal,
