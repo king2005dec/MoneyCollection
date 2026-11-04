@@ -476,7 +476,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           );
           if (targetPeriod) {
             const oldPaid = targetPeriod.paid_amount || 0;
-            const diff = payVal - oldPaid;
 
             // Direct update of period paid_amount.
             // If staff entered 1000 by mistake and actual was 800,
@@ -487,33 +486,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               `Owner corrected paid amount from ${formatCurrency(oldPaid)} to ${formatCurrency(payVal)}`,
               actor
             );
-
-            // Record correction in collections list for audit history
-            if (diff !== 0) {
-              const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
-              collections.unshift({
-                id: `col-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substr(2, 4)}`,
-                receipt_number: `RCP-CORR-${Date.now().toString().slice(-6)}`,
-                customer_id: customerId,
-                section_id: sectionId,
-                billing_period_id: targetPeriod.id,
-                amount: diff,
-                payment_method: 'Cash',
-                status: 'Confirmed',
-                notes: `Owner corrected payment from ₹${oldPaid} to ₹${payVal}`,
-                collection_date: new Date().toISOString().slice(0, 10),
-                collection_time: new Date().toTimeString().slice(0, 8),
-                sync_device: 'browser',
-                sync_device_info: 'Owner direct edit',
-                sync_timestamp: new Date().toISOString(),
-                created_by: actor.id,
-                created_by_name: actor.name,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              });
-              setStored(STORAGE_KEYS.COLLECTIONS, collections);
-              await broadcastDataSync([STORAGE_KEYS.COLLECTIONS], actor.name);
-            }
 
             showUpdateToast(`Updated paid amount to ${formatCurrency(payVal)}! Current balance adjusted.`);
           } else {
