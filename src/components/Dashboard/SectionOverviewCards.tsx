@@ -17,8 +17,13 @@ export const SectionOverviewCards: React.FC<SectionOverviewCardsProps> = ({
 }) => {
   const { setActivePage } = useApp();
 
-  // Current month: October 2026
-  const currentMonthPeriods = billingPeriods.filter(p => p.billing_month === 10 && p.billing_year === 2026);
+  // Use active/latest month's periods dynamically
+  const latestPeriod = billingPeriods.length > 0 
+    ? [...billingPeriods].sort((a, b) => ((b.billing_year || 2026) * 100 + (b.billing_month || 1)) - ((a.billing_year || 2026) * 100 + (a.billing_month || 1)))[0]
+    : null;
+  const activeMonth = latestPeriod ? (latestPeriod.billing_month || 10) : 10;
+  const activeYear = latestPeriod ? (latestPeriod.billing_year || 2026) : 2026;
+  const currentMonthPeriods = billingPeriods.filter(p => p.billing_month === activeMonth && p.billing_year === activeYear);
 
   const getSectionStats = (sectionId: string) => {
     const assignedCustomers = customers.filter(c => c.assigned_section_ids.includes(sectionId) && c.is_active);

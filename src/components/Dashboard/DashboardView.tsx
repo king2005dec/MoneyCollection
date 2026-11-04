@@ -105,30 +105,10 @@ export const DashboardView: React.FC = () => {
       bc.onmessage = () => loadData();
     }
 
-    const supabase = getSupabaseClient();
-    let channel: any = null;
-    if (supabase) {
-      try {
-        channel = supabase
-          .channel('raj_collection_sync_v3')
-          .on('broadcast', { event: 'data_changed' }, () => {
-            loadData();
-          })
-          .subscribe();
-      } catch (e) {
-        console.warn('Dashboard supabase sync error:', e);
-      }
-    }
-
     window.addEventListener('storage', handleStorage);
     return () => {
       window.removeEventListener('storage', handleStorage);
       if (bc) bc.close();
-      if (supabase && channel) {
-        try {
-          supabase.removeChannel(channel);
-        } catch (e) {}
-      }
     };
   }, []);
 
@@ -225,7 +205,7 @@ export const DashboardView: React.FC = () => {
               dateFilter === 'this_month' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            This Month (Oct 2026)
+            This Month
           </button>
             <button
               onClick={() => setShowPendingAbove500(!showPendingAbove500)}

@@ -49,7 +49,7 @@ export const StatCards: React.FC<StatCardsProps> = ({ metrics }) => {
           {formatCurrency(metrics.totalCollectionToday)}
         </div>
         <div className="text-[11px] text-blue-700 font-medium mt-1">
-          22 Oct 2026 (Live field sync)
+          Today's verified live collections
         </div>
       </div>
 
@@ -65,7 +65,7 @@ export const StatCards: React.FC<StatCardsProps> = ({ metrics }) => {
           {formatCurrency(metrics.totalCollectionThisMonth)}
         </div>
         <div className="text-[11px] text-emerald-700 font-medium mt-1">
-          October 2026 total verified
+          Current cycle verified collections
         </div>
       </div>
 

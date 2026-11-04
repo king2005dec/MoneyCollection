@@ -1580,34 +1580,55 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   const collections = await getCollections();
   const customers = await getCustomers();
 
-  // Find the most recent billing month/year that has data
+  // Find the active/latest billing month/year that has data
   let currentMonth = 10;
   let currentYear = 2026;
   if (periods.length > 0) {
     const sorted = [...periods].sort((a, b) => {
-      if (a.billing_year !== b.billing_year) return b.billing_year - a.billing_year;
-      return b.billing_month - a.billing_month;
+      const scoreA = (a.billing_year || 2026) * 100 + (a.billing_month || 1);
+      const scoreB = (b.billing_year || 2026) * 100 + (b.billing_month || 1);
+      return scoreB - scoreA;
     });
-    currentMonth = sorted[0].billing_month;
-    currentYear = sorted[0].billing_year;
+    currentMonth = sorted[0].billing_month || 10;
+    currentYear = sorted[0].billing_year || 2026;
   }
 
   const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayUtc = today.toISOString().slice(0, 10);
+  const todayLocal = today.toLocaleDateString('en-CA'); // YYYY-MM-DD
   const currentMonthPeriods = periods.filter(p => p.billing_month === currentMonth && p.billing_year === currentYear);
   
-  // Total Outstanding balance across all billing periods
-  const totalOutstanding = periods.reduce((sum, p) => sum + Math.max(0, p.closing_balance), 0);
+  // Total Outstanding balance: calculated from the latest period for each customer+section
+  // Prevents double-counting balances across multiple months!
+  const latestPeriodMap = new Map<string, BillingPeriod>();
+  for (const p of periods) {
+    const key = `${p.customer_id}_${p.section_id}`;
+    const score = (p.billing_year || 2026) * 100 + (p.billing_month || 1);
+    const existing = latestPeriodMap.get(key);
+    if (!existing || score > ((existing.billing_year || 2026) * 100 + (existing.billing_month || 1))) {
+      latestPeriodMap.set(key, p);
+    }
+  }
+  const totalOutstanding = Array.from(latestPeriodMap.values())
+    .reduce((sum, p) => sum + Math.max(0, p.closing_balance), 0);
 
   // Collections filter
   const confirmedCols = collections.filter(c => c.status === 'Confirmed');
 
+  // Match collections made today (supports both UTC and local timezone dates)
   const totalCollectionToday = confirmedCols
-    .filter(c => c.collection_date === todayStr)
+    .filter(c => c.collection_date === todayUtc || c.collection_date === todayLocal)
     .reduce((sum, c) => sum + c.amount, 0);
 
-  // Current month collections
-  const currentMonthCols = confirmedCols.filter(c => c.collection_date.startsWith(`${currentYear}-${String(currentMonth).padStart(2, '0')}`));
+  // Current month collections (matches active month or current calendar month)
+  const activeMonthPrefix = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+  const calMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  
+  const currentMonthCols = confirmedCols.filter(c => {
+    if (!c.collection_date) return false;
+    return c.collection_date.startsWith(activeMonthPrefix) || c.collection_date.startsWith(calMonthPrefix);
+  });
+  
   const totalCollectionThisMonth = currentMonthCols.reduce((sum, c) => sum + c.amount, 0);
 
   const totalCashThisMonth = currentMonthCols
@@ -1618,7 +1639,7 @@ export async function getDashboardMetrics(): Promise<DashboardMetrics> {
     .filter(c => c.payment_method !== 'Cash')
     .reduce((sum, c) => sum + c.amount, 0);
 
-  // Customer status breakdown for current month
+  // Customer status breakdown for current active month
   let fullyPaidCount = 0;
   let partiallyPaidCount = 0;
   let overdueCount = 0;
