@@ -323,21 +323,18 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     );
 
     const prevBalance = period
-      ? period.opening_balance
+      ? (period.opening_balance ?? 0)
       : (prevPeriod ? Math.max(0, prevPeriod.closing_balance) : 0);
 
     const thisMonth = period
-      ? (period.bill_amount + period.additional_charges - period.credits_or_adjustments)
+      ? Number(((period.bill_amount ?? 0) + (period.additional_charges ?? 0) - (period.credits_or_adjustments ?? 0)).toFixed(2))
       : 0;
 
-    // Use period actual total_amount_due and closing_balance so live updates reflect immediately
-    const pay = period ? period.paid_amount : 0;
-    const totalBalance = period && period.total_amount_due !== undefined
-      ? period.total_amount_due
-      : (prevBalance + thisMonth);
-    const currentBalance = period && period.closing_balance !== undefined
-      ? Math.max(0, period.closing_balance)
-      : Math.max(0, totalBalance - pay);
+    // Strict formula: Total Balance = Prev Balance + This Month
+    // Current Balance = Total Balance - Pay
+    const pay = period ? (period.paid_amount ?? 0) : 0;
+    const totalBalance = Number((prevBalance + thisMonth).toFixed(2));
+    const currentBalance = Math.max(0, Number((totalBalance - pay).toFixed(2)));
 
     // Meter readings
     const currentUnit = period?.current_unit ?? 0;
@@ -534,15 +531,14 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                  p.billing_month === selectedMonth &&
                  p.billing_year === selectedYear
           );
-          if (targetPeriod) {
-            await updateBillingPeriodCharges(
-              targetPeriod.id,
-              { bill_amount: numVal },
-              `Owner updated monthly bill to ${numVal}`,
-              actor
-            );
-            showUpdateToast(`Updated monthly bill to ${formatCurrency(numVal)}`);
-          }
+          const periodId = targetPeriod?.id || `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
+          await updateBillingPeriodCharges(
+            periodId,
+            { bill_amount: numVal },
+            `Owner updated monthly bill to ${numVal}`,
+            actor
+          );
+          showUpdateToast(`Updated monthly bill to ${formatCurrency(numVal)}`);
         }
         } else if (field === 'prev_balance') {
         if (!isOwner) {
@@ -563,15 +559,14 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                  p.billing_month === selectedMonth &&
                  p.billing_year === selectedYear
           );
-          if (targetPeriod) {
-            await updateBillingPeriodCharges(
-              targetPeriod.id,
-              { opening_balance: numVal } as any,
-              `Owner updated previous balance to ${numVal}`,
-              actor
-            );
-            showUpdateToast(`Updated previous balance to ${formatCurrency(numVal)}`);
-          }
+          const periodId = targetPeriod?.id || `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
+          await updateBillingPeriodCharges(
+            periodId,
+            { opening_balance: numVal },
+            `Owner updated previous balance to ${numVal}`,
+            actor
+          );
+          showUpdateToast(`Updated previous balance to ${formatCurrency(numVal)}`);
         }
       } else if (field === 'current_unit') {
         {

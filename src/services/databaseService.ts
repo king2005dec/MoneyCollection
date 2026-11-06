@@ -647,10 +647,38 @@ export async function updateBillingPeriodCharges(
   actor: { id: string; name: string }
 ): Promise<BillingPeriod | undefined> {
   const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
-  const target = periods.find(p => p.id === id);
-  if (!target) return undefined;
-
+  let target = periods.find(p => p.id === id);
   const { device, device_info, timestamp } = getDeviceInfo();
+
+  if (!target) {
+    const parts = id.split('-');
+    const parsedMonth = parseInt(parts[parts.length - 2], 10) || 10;
+    const parsedYear = parseInt(parts[parts.length - 1], 10) || 2026;
+    const customerId = parts[1] || '';
+    const sectionId = parts[2] && parts[2].startsWith('sec') ? `${parts[2]}-${parts[3]}-${parts[4]}` : 'sec-elec-001';
+    target = {
+      id,
+      customer_id: customerId,
+      section_id: sectionId,
+      billing_month: parsedMonth,
+      billing_year: parsedYear,
+      opening_balance: charges.opening_balance ?? 0,
+      bill_amount: charges.bill_amount ?? 0,
+      additional_charges: charges.additional_charges ?? 0,
+      credits_or_adjustments: charges.credits_or_adjustments ?? 0,
+      total_amount_due: 0,
+      paid_amount: charges.paid_amount ?? 0,
+      closing_balance: 0,
+      due_date: `${parsedYear}-${String(parsedMonth).padStart(2, '0')}-05`,
+      payment_status: 'Pending',
+      sync_device: device,
+      sync_device_info: device_info,
+      sync_timestamp: timestamp,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    periods.push(target);
+  }
 
   const prevValues = {
     bill_amount: target.bill_amount,
@@ -684,22 +712,18 @@ export async function updateBillingPeriodCharges(
     target.units_consumed = Math.max(0, charges.current_unit - prevU);
   }
 
+  // Strict formula: Total Balance = Prev Balance + This Month
+  // Current Balance = Total Balance - Pay
+  const prevBal = target.opening_balance || 0;
+  const thisM = Number(((target.bill_amount || 0) + (target.additional_charges || 0) - (target.credits_or_adjustments || 0)).toFixed(2));
+  const calculatedTotalDue = Number((prevBal + thisM).toFixed(2));
+
+  target.total_amount_due = calculatedTotalDue;
   if (charges.closing_balance !== undefined) {
     target.closing_balance = charges.closing_balance;
-    target.total_amount_due = Number((target.paid_amount + target.closing_balance).toFixed(2));
-  } else if (charges.bill_amount !== undefined || charges.opening_balance !== undefined || charges.additional_charges !== undefined || charges.credits_or_adjustments !== undefined || charges.paid_amount !== undefined) {
-    // Recalculate totals when bill, balance, or paid amount changes
-    const rawDue = Number(((target.opening_balance || 0) + (target.bill_amount || 0) + (target.additional_charges || 0) - (target.credits_or_adjustments || 0)).toFixed(2));
-    const baseDue = rawDue > 0 ? rawDue : (target.total_amount_due > 0 ? target.total_amount_due : Number(((target.paid_amount || 0) + (target.closing_balance || 0)).toFixed(2)));
-    if (target.paid_amount >= baseDue) {
-      target.total_amount_due = target.paid_amount;
-      target.closing_balance = 0;
-    } else {
-      target.total_amount_due = baseDue;
-      target.closing_balance = Number(Math.max(0, baseDue - target.paid_amount).toFixed(2));
-    }
+  } else {
+    target.closing_balance = Number(Math.max(0, calculatedTotalDue - (target.paid_amount || 0)).toFixed(2));
   }
-  // If only current_unit/previous_unit changed, don't touch closing_balance or total_amount_due
 
   target.payment_status = computePaymentStatus(target.total_amount_due, target.paid_amount, target.due_date);
   target.sync_device = device;
@@ -876,20 +900,15 @@ export async function updateOwnerPaymentDirectly(
     };
     periods.push(target);
   } else {
-    const prevPaid = target.paid_amount || 0;
-    const rawDue = Number(((target.opening_balance || 0) + (target.bill_amount || 0) + (target.additional_charges || 0) - (target.credits_or_adjustments || 0)).toFixed(2));
-    const baseDue = rawDue > 0
-      ? rawDue
-      : (target.total_amount_due > 0 ? target.total_amount_due : Number(((prevPaid || 0) + (target.closing_balance || 0)).toFixed(2)));
+    // Strict formula: Total Balance = Prev Balance + This Month
+    // Current Balance = Total Balance - Pay
+    const prevBal = target.opening_balance || 0;
+    const thisM = Number(((target.bill_amount || 0) + (target.additional_charges || 0) - (target.credits_or_adjustments || 0)).toFixed(2));
+    const totalDue = Number((prevBal + thisM).toFixed(2));
 
     target.paid_amount = safePay;
-    if (safePay >= baseDue) {
-      target.total_amount_due = safePay;
-      target.closing_balance = 0;
-    } else {
-      target.total_amount_due = baseDue;
-      target.closing_balance = Number(Math.max(0, baseDue - safePay).toFixed(2));
-    }
+    target.total_amount_due = totalDue;
+    target.closing_balance = Number(Math.max(0, totalDue - safePay).toFixed(2));
 
     target.payment_status = computePaymentStatus(target.total_amount_due, target.paid_amount, target.due_date);
     target.sync_device = device;
@@ -1379,10 +1398,14 @@ export async function addCollection(
     periods.push(period);
   }
 
-  period.paid_amount = Number((period.paid_amount + newCollection.amount).toFixed(2));
-  if (period.total_amount_due < period.paid_amount) {
-    period.total_amount_due = period.paid_amount;
+  const prevBal = period.opening_balance || 0;
+  const thisM = Number(((period.bill_amount || 0) + (period.additional_charges || 0) - (period.credits_or_adjustments || 0)).toFixed(2));
+  const calculatedTotalDue = Number((prevBal + thisM).toFixed(2));
+  if (calculatedTotalDue > 0) {
+    period.total_amount_due = calculatedTotalDue;
   }
+
+  period.paid_amount = Number((period.paid_amount + newCollection.amount).toFixed(2));
   period.closing_balance = Number(Math.max(0, period.total_amount_due - period.paid_amount).toFixed(2));
   period.payment_status = computePaymentStatus(period.total_amount_due, period.paid_amount, period.due_date);
   period.sync_device = device;
