@@ -349,41 +349,28 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
            p.billing_year === prevYear
     );
 
-    const prevBalanceRaw = period
+    const prevBalance = period
       ? (period.opening_balance ?? 0)
       : (prevPeriod ? Math.max(0, prevPeriod.closing_balance) : 0);
 
-    const thisMonthRaw = period
+    const thisMonth = period
       ? Number(((period.bill_amount ?? 0) + (period.additional_charges ?? 0) - (period.credits_or_adjustments ?? 0)).toFixed(2))
       : 0;
 
     const pay = period ? (period.paid_amount ?? 0) : 0;
 
-    // Strict formula:
-    // Total Balance = Prev Balance + This Month
-    // Current Balance = Total Balance - Pay
-    // Total Balance = Pay + Current Balance
-    let currentBalance: number;
-    if (period && typeof period.closing_balance === 'number') {
-      currentBalance = Math.max(0, period.closing_balance);
-    } else {
-      currentBalance = Math.max(0, Number((prevBalanceRaw + thisMonthRaw - pay).toFixed(2)));
+    // Strict user formula:
+    // 1) This Month + Prev Balance = Total Balance
+    // 2) Total Balance - Pay = Current Balance
+    let totalBalance = Number((prevBalance + thisMonth).toFixed(2));
+
+    // Fallback: If both prevBalance and thisMonth are 0, but period has a positive closing_balance,
+    // honor closing_balance so direct edits are never lost
+    if (totalBalance === 0 && period && (period.closing_balance ?? 0) > 0) {
+      totalBalance = Number(((period.closing_balance ?? 0) + pay).toFixed(2));
     }
 
-    const totalBalance = Number((pay + currentBalance).toFixed(2));
-
-    let thisMonth = thisMonthRaw;
-    let prevBalance = prevBalanceRaw;
-
-    // Strictly ensure: Prev Balance + This Month = Total Balance
-    if (Number((prevBalance + thisMonth).toFixed(2)) !== totalBalance) {
-      if (thisMonth <= totalBalance) {
-        prevBalance = Number((totalBalance - thisMonth).toFixed(2));
-      } else {
-        thisMonth = totalBalance;
-        prevBalance = 0;
-      }
-    }
+    const currentBalance = Math.max(0, Number((totalBalance - pay).toFixed(2)));
 
     // Meter readings
     const currentUnit = period?.current_unit ?? 0;
@@ -551,6 +538,12 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           showUpdateToast(`Updated paid amount to ${formatCurrency(payVal)}! Remaining balance & Dashboard updated.`);
         }
       } else if (field === 'closing_balance') {
+        // Only Owner can directly edit balance — Staff uses Action > Update
+        if (!isOwner) {
+          showToast('Only Owner can edit balance directly. Staff can record payment via Action > Update.', 'error');
+          setEditingCell(null);
+          return;
+        }
         {
           const numVal = parseFloat(editValue);
           if (isNaN(numVal) || numVal < 0) {
@@ -1690,17 +1683,25 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       {row.totalBalance > 0 ? row.totalBalance : 0}
                     </td>
 
-                    {/* 7. Current Balance (Pending Due) - Editable by Staff & Owner */}
+                    {/* 7. Current Balance (Pending Due) - Editable by Owner ONLY */}
                     <td
                       onClick={() => {
+                        if (!isOwner) {
+                          showToast('Only Owner can edit balance directly. Staff can record payment via Action > Update.', 'info');
+                          return;
+                        }
                         handleCellClick(row.customer.id, row.targetSectionId, 'closing_balance', row.currentBalance, row.period?.id);
                       }}
-                      className={`py-2 px-3 text-right font-bold border-r border-slate-200 cursor-pointer hover:bg-rose-100 group ${
+                      className={`py-2 px-3 text-right font-bold border-r border-slate-200 ${
+                        isOwner
+                          ? 'cursor-pointer hover:bg-rose-100 group'
+                          : 'cursor-not-allowed opacity-85'
+                      } ${
                         row.currentBalance > 0 ? 'text-rose-700 bg-rose-50/80' : 'text-slate-400'
                       }`}
-                      title="Click to directly update remaining balance"
+                      title={isOwner ? 'Owner: Click to directly update remaining balance' : 'Staff cannot edit balance directly'}
                     >
-                      {editingCell?.customerId === row.customer.id && editingCell?.field === 'closing_balance' ? (
+                      {isOwner && editingCell?.customerId === row.customer.id && editingCell?.field === 'closing_balance' ? (
                         <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
                           <input
                             type="number"
@@ -1725,7 +1726,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                       ) : (
                         <div className="flex items-center justify-end gap-1">
                           <span>{row.currentBalance}</span>
-                          <Pencil className="w-2.5 h-2.5 text-rose-500 opacity-0 group-hover:opacity-100" />
+                          {isOwner && <Pencil className="w-2.5 h-2.5 text-rose-500 opacity-0 group-hover:opacity-100" />}
                         </div>
                       )}
                     </td>
