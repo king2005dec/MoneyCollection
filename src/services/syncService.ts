@@ -185,32 +185,21 @@ export async function pushKeyToCloud(key: string, data: unknown, actorName?: str
 
 /**
  * Called after any write operation (payments, balance edits, meter updates)
+ * Instant local persistence with non-blocking parallel cloud background sync
  */
 export async function syncAfterWrite(changedKeys: string[], actorName?: string): Promise<void> {
   const supabase = getSupabaseClient();
   const nowStr = new Date().toISOString();
 
-  // 1. Write locally and to Supabase for all changed keys
+  // 1. Instant local write to localStorage (0ms)
   for (const key of changedKeys) {
     const data = readLocal(key, null);
     if (data !== null) {
       writeLocal(key, data);
-      if (supabase) {
-        _lastSyncedTimestamps[key] = nowStr;
-        try {
-          await supabase.from('system_settings').upsert({
-            key,
-            value: data,
-            updated_at: nowStr,
-          });
-        } catch (e) {
-          console.warn(`[Sync] Supabase upsert error on ${key}:`, e);
-        }
-      }
     }
   }
 
-  // 2. Notify other tabs on same device via BroadcastChannel
+  // 2. Notify other tabs on same device via BroadcastChannel instantly (0ms)
   if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
     try {
       const bc = new BroadcastChannel('money_collection_live_sync');
@@ -219,23 +208,40 @@ export async function syncAfterWrite(changedKeys: string[], actorName?: string):
     } catch { /* ignore */ }
   }
 
-  // 3. Send single Supabase Realtime broadcast with all changed keys
-  if (_channel) {
-    try {
-      await _channel.send({
-        type: 'broadcast',
-        event: 'data_changed',
-        payload: {
-          key: changedKeys[0] || 'all',
-          keys: changedKeys,
-          actorName: actorName || 'Staff',
-          deviceId: _deviceId,
-          timestamp: Date.now(),
-        },
-      });
-    } catch (e) {
-      console.warn('[Sync] Broadcast send error:', e);
-    }
+  // 3. Push to Supabase Cloud in parallel without blocking UI response
+  if (supabase) {
+    Promise.all(
+      changedKeys.map(async (key) => {
+        const data = readLocal(key, null);
+        if (data !== null) {
+          _lastSyncedTimestamps[key] = nowStr;
+          try {
+            await supabase.from('system_settings').upsert({
+              key,
+              value: data,
+              updated_at: nowStr,
+            });
+          } catch (e) {
+            console.warn(`[Sync] Supabase upsert error on ${key}:`, e);
+          }
+        }
+      })
+    ).then(() => {
+      // 4. Send lightweight real-time broadcast to other devices
+      if (_channel) {
+        _channel.send({
+          type: 'broadcast',
+          event: 'data_changed',
+          payload: {
+            key: changedKeys[0] || 'all',
+            keys: changedKeys,
+            actorName: actorName || 'Staff',
+            deviceId: _deviceId,
+            timestamp: Date.now(),
+          },
+        }).catch((e: any) => console.warn('[Sync] Broadcast send error:', e));
+      }
+    }).catch(e => console.warn('[Sync] Parallel sync error:', e));
   }
 }
 

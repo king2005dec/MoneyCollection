@@ -241,7 +241,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
   useEffect(() => {
     const load = async () => {
-      setLoading(true);
+      // Only set full loader if first time loading to avoid screen flash/delay
+      if (customers.length === 0) setLoading(true);
       try {
         const [c, b, col, s] = await Promise.all([
           getCustomers(),
@@ -261,6 +262,32 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     };
     load();
   }, [dbVersion]);
+
+  // Auto-initialize current billing month if no records exist yet for this month
+  useEffect(() => {
+    if (customers.length > 0 && billingPeriods.length > 0) {
+      const hasCurrentMonthPeriods = billingPeriods.some(
+        p => p.billing_month === selectedMonth && p.billing_year === selectedYear
+      );
+      if (!hasCurrentMonthPeriods) {
+        const prevM = selectedMonth === 1 ? 12 : selectedMonth - 1;
+        const prevY = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
+        const actor = {
+          id: currentUser?.id || 'usr-owner-001',
+          name: currentUser?.full_name || 'Raj',
+        };
+        carryForwardMonth(selectedMonth, selectedYear, prevM, prevY, 15, actor)
+          .then(async res => {
+            if (res.countCreated > 0) {
+              const fresh = await getBillingPeriods();
+              if (fresh.length > 0) setBillingPeriods(fresh);
+              triggerDbRefresh();
+            }
+          })
+          .catch(e => console.warn('Auto carry-forward error:', e));
+      }
+    }
+  }, [selectedMonth, selectedYear, customers.length, billingPeriods.length]);
 
   // Section mapping
   const section1 = sections.find(s => s.code === 'electricity') || { id: 'sec-elec-001', name: 'Section 1' };
@@ -448,6 +475,19 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       name: currentUser?.full_name || (isOwner ? 'Raj' : (currentUser?.username || 'Staff')),
     };
 
+    const applyPeriodUpdate = (updated?: BillingPeriod) => {
+      if (!updated) return;
+      setBillingPeriods(prev => {
+        const idx = prev.findIndex(p => p.id === updated.id || (p.customer_id === updated.customer_id && p.section_id === updated.section_id && p.billing_month === updated.billing_month && p.billing_year === updated.billing_year));
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = updated;
+          return next;
+        }
+        return [...prev, updated];
+      });
+    };
+
     setSavingCell(true);
     try {
       if (field === 'name') {
@@ -463,7 +503,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         }
         await updateCustomer(customerId, { full_name: editValue.trim() }, actor);
         showUpdateToast(`Updated resident name to "${editValue.trim()}"`);
-        } else if (field === 'pay') {
+      } else if (field === 'pay') {
         if (!isOwner) {
           showToast('Only Owner can edit paid amount directly.', 'error');
           setEditingCell(null);
@@ -477,11 +517,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             return;
           }
 
-          // Direct update of period paid_amount and collections.
-          // If staff entered 1000 by mistake and actual was 800:
-          // Owner changes to 800 -> closing_balance automatically restores +200 remaining balance,
-          // and collections array updates so Dashboard metrics immediately reflect the change!
-          await updateOwnerPaymentDirectly(
+          const updated = await updateOwnerPaymentDirectly(
             customerId,
             sectionId,
             selectedMonth,
@@ -489,11 +525,10 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             payVal,
             actor
           );
-
+          applyPeriodUpdate(updated);
           showUpdateToast(`Updated paid amount to ${formatCurrency(payVal)}! Remaining balance & Dashboard updated.`);
         }
-        } else if (field === 'closing_balance') {
-        // Staff or Owner updating remaining balance directly
+      } else if (field === 'closing_balance') {
         {
           const numVal = parseFloat(editValue);
           if (isNaN(numVal) || numVal < 0) {
@@ -501,7 +536,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             setEditingCell(null);
             return;
           }
-          await updateRemainingDueDirectly(
+          const updated = await updateRemainingDueDirectly(
             customerId,
             sectionId,
             selectedMonth,
@@ -510,9 +545,10 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             'Balance updated directly from Ledger view',
             actor
           );
+          applyPeriodUpdate(updated);
           showUpdateToast(`Balance synchronized to ${formatCurrency(numVal)}!`);
         }
-        } else if (field === 'this_month') {
+      } else if (field === 'this_month') {
         if (!isOwner) {
           showToast('Only Owner can edit this month bill amount.', 'error');
           setEditingCell(null);
@@ -532,15 +568,16 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                  p.billing_year === selectedYear
           );
           const periodId = targetPeriod?.id || `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
-          await updateBillingPeriodCharges(
+          const updated = await updateBillingPeriodCharges(
             periodId,
             { bill_amount: numVal },
             `Owner updated monthly bill to ${numVal}`,
             actor
           );
+          applyPeriodUpdate(updated);
           showUpdateToast(`Updated monthly bill to ${formatCurrency(numVal)}`);
         }
-        } else if (field === 'prev_balance') {
+      } else if (field === 'prev_balance') {
         if (!isOwner) {
           showToast('Only Owner can edit previous balance.', 'error');
           setEditingCell(null);
@@ -560,12 +597,13 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                  p.billing_year === selectedYear
           );
           const periodId = targetPeriod?.id || `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
-          await updateBillingPeriodCharges(
+          const updated = await updateBillingPeriodCharges(
             periodId,
             { opening_balance: numVal },
             `Owner updated previous balance to ${numVal}`,
             actor
           );
+          applyPeriodUpdate(updated);
           showUpdateToast(`Updated previous balance to ${formatCurrency(numVal)}`);
         }
       } else if (field === 'current_unit') {
@@ -602,29 +640,21 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               `Updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
               actor
             );
+            applyPeriodUpdate(result);
             if (result) {
               showUpdateToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
             } else {
               showToast('Failed to update meter reading. Please try again.', 'error');
             }
           } else {
-            // Create/update period if missing
-            await updateRemainingDueDirectly(
-              customerId,
-              sectionId,
-              selectedMonth,
-              selectedYear,
-              0,
-              'Initial billing period created',
-              actor
-            );
             const periodId = `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
-            await updateBillingPeriodCharges(
+            const result = await updateBillingPeriodCharges(
               periodId,
               { current_unit: numVal },
               `Updated meter reading to ${numVal}`,
               actor
             );
+            applyPeriodUpdate(result);
             showUpdateToast(`Updated meter reading to ${numVal}!`);
           }
         }
@@ -660,7 +690,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               }
             }
 
-            await updateBillingPeriodCharges(
+            const result = await updateBillingPeriodCharges(
               targetPeriod.id,
               {
                 previous_unit: numVal,
@@ -670,6 +700,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               `Owner updated previous meter unit to ${numVal} (Consumed: ${consumed} units → Bill: ${formatCurrency(newBill)})`,
               actor
             );
+            applyPeriodUpdate(result);
             showUpdateToast(`Updated previous unit to ${numVal} (Consumed: ${consumed} units → Bill: ${formatCurrency(newBill)})`);
           }
         }
@@ -742,6 +773,10 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
       showUpdateToast(`Payment of ${formatCurrency(payNum)} recorded successfully for ${balanceModalCustomer.customer.full_name}! Remaining balance updated.`);
       setBalanceModalCustomer(null);
+      const freshPeriods = await getBillingPeriods();
+      if (freshPeriods.length > 0) setBillingPeriods(freshPeriods);
+      const freshCols = await getCollections();
+      if (freshCols.length > 0) setCollections(freshCols);
       triggerDbRefresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to record payment', 'error');
@@ -777,6 +812,10 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       );
       showUpdateToast(`Received UPI payment of ${formatCurrency(paidAmount)} for ${upiModalData.customerName}!`);
       setUpiModalData(null);
+      const freshPeriods = await getBillingPeriods();
+      if (freshPeriods.length > 0) setBillingPeriods(freshPeriods);
+      const freshCols = await getCollections();
+      if (freshCols.length > 0) setCollections(freshCols);
       triggerDbRefresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to record UPI payment', 'error');

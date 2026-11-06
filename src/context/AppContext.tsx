@@ -89,16 +89,34 @@ interface AppContextType {
   dismissToast: (id: string) => void;
 }
 
+export function getActiveCycleMonthAndYear(): { month: number; year: number } {
+  const now = new Date();
+  const day = now.getDate();
+  const calMonth = now.getMonth() + 1; // 1-12
+  const calYear = now.getFullYear();
+
+  // Billing cycle rule: starts 5th of month, ends 4th of next month
+  // On the 5th, cycle resets to the current calendar month cycle
+  if (day >= 5) {
+    return { month: calMonth, year: calYear };
+  } else {
+    const prevM = calMonth === 1 ? 12 : calMonth - 1;
+    const prevY = calMonth === 1 ? calYear - 1 : calYear;
+    return { month: prevM, year: prevY };
+  }
+}
+
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const initialCycle = getActiveCycleMonthAndYear();
   const [activePage, setActivePage] = useState<NavPage>('dashboard');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [returnSectionPage, setReturnSectionPage] = useState<string | null>(null);
   const [sections, setSections] = useState<CollectionSection[]>([]);
   const [dbVersion, setDbVersion] = useState<number>(0);
-  const [currentBillingMonth, setCurrentBillingMonth] = useState<number>(10);
-  const [currentBillingYear, setCurrentBillingYear] = useState<number>(2026);
+  const [currentBillingMonth, setCurrentBillingMonth] = useState<number>(initialCycle.month);
+  const [currentBillingYear, setCurrentBillingYear] = useState<number>(initialCycle.year);
 
   // Modals state
   const [paymentModal, setPaymentModal] = useState<PaymentModalProps>({ isOpen: false });
