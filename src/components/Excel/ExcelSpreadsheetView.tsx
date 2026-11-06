@@ -349,19 +349,41 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
            p.billing_year === prevYear
     );
 
-    const prevBalance = period
+    const prevBalanceRaw = period
       ? (period.opening_balance ?? 0)
       : (prevPeriod ? Math.max(0, prevPeriod.closing_balance) : 0);
 
-    const thisMonth = period
+    const thisMonthRaw = period
       ? Number(((period.bill_amount ?? 0) + (period.additional_charges ?? 0) - (period.credits_or_adjustments ?? 0)).toFixed(2))
       : 0;
 
-    // Strict formula: Total Balance = Prev Balance + This Month
-    // Current Balance = Total Balance - Pay
     const pay = period ? (period.paid_amount ?? 0) : 0;
-    const totalBalance = Number((prevBalance + thisMonth).toFixed(2));
-    const currentBalance = Math.max(0, Number((totalBalance - pay).toFixed(2)));
+
+    // Strict formula:
+    // Total Balance = Prev Balance + This Month
+    // Current Balance = Total Balance - Pay
+    // Total Balance = Pay + Current Balance
+    let currentBalance: number;
+    if (period && typeof period.closing_balance === 'number') {
+      currentBalance = Math.max(0, period.closing_balance);
+    } else {
+      currentBalance = Math.max(0, Number((prevBalanceRaw + thisMonthRaw - pay).toFixed(2)));
+    }
+
+    const totalBalance = Number((pay + currentBalance).toFixed(2));
+
+    let thisMonth = thisMonthRaw;
+    let prevBalance = prevBalanceRaw;
+
+    // Strictly ensure: Prev Balance + This Month = Total Balance
+    if (Number((prevBalance + thisMonth).toFixed(2)) !== totalBalance) {
+      if (thisMonth <= totalBalance) {
+        prevBalance = Number((totalBalance - thisMonth).toFixed(2));
+      } else {
+        thisMonth = totalBalance;
+        prevBalance = 0;
+      }
+    }
 
     // Meter readings
     const currentUnit = period?.current_unit ?? 0;
@@ -481,10 +503,10 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         const idx = prev.findIndex(p => p.id === updated.id || (p.customer_id === updated.customer_id && p.section_id === updated.section_id && p.billing_month === updated.billing_month && p.billing_year === updated.billing_year));
         if (idx >= 0) {
           const next = [...prev];
-          next[idx] = updated;
+          next[idx] = { ...updated };
           return next;
         }
-        return [...prev, updated];
+        return [...prev, { ...updated }];
       });
     };
 
@@ -1671,20 +1693,12 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                     {/* 7. Current Balance (Pending Due) - Editable by Staff & Owner */}
                     <td
                       onClick={() => {
-                        if (!isOwner) {
-                          showToast('Owner only: Use Action > Update to record payment.', 'info');
-                          return;
-                        }
                         handleCellClick(row.customer.id, row.targetSectionId, 'closing_balance', row.currentBalance, row.period?.id);
                       }}
-                      className={`py-2 px-3 text-right font-bold border-r border-slate-200 ${
-                        isOwner
-                          ? 'cursor-pointer hover:bg-rose-100 group'
-                          : 'cursor-default opacity-70'
-                      } ${
+                      className={`py-2 px-3 text-right font-bold border-r border-slate-200 cursor-pointer hover:bg-rose-100 group ${
                         row.currentBalance > 0 ? 'text-rose-700 bg-rose-50/80' : 'text-slate-400'
                       }`}
-                      title={isOwner ? 'Owner: Click to directly update remaining balance' : 'Staff cannot edit balance directly. Use Action > Update.'}
+                      title="Click to directly update remaining balance"
                     >
                       {editingCell?.customerId === row.customer.id && editingCell?.field === 'closing_balance' ? (
                         <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>

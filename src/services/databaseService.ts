@@ -1049,8 +1049,8 @@ export async function updateRemainingDueDirectly(
       section_id: sectionId,
       billing_month: month,
       billing_year: year,
-      opening_balance: 0,
-      bill_amount: safeDue,
+      opening_balance: safeDue,
+      bill_amount: 0,
       additional_charges: 0,
       credits_or_adjustments: 0,
       total_amount_due: safeDue,
@@ -1066,10 +1066,21 @@ export async function updateRemainingDueDirectly(
     };
     periods.push(target);
   } else {
-    // Direct balance edit: only adjust closing_balance and total_amount_due.
-    // Do NOT recalculate bill_amount — that would corrupt the actual bill.
+    // Direct balance edit: update closing_balance and total_amount_due.
     target.closing_balance = safeDue;
     target.total_amount_due = Number((target.paid_amount + safeDue).toFixed(2));
+
+    // Maintain strict formula: Prev Balance (opening_balance) + This Month (bill_amount) = Total Balance (total_amount_due)
+    const thisMonthBill = Number(((target.bill_amount ?? 0) + (target.additional_charges ?? 0) - (target.credits_or_adjustments ?? 0)).toFixed(2));
+    if (thisMonthBill > 0 && target.total_amount_due >= thisMonthBill) {
+      target.opening_balance = Number((target.total_amount_due - thisMonthBill).toFixed(2));
+    } else if (thisMonthBill > 0 && target.total_amount_due < thisMonthBill) {
+      target.opening_balance = 0;
+      target.bill_amount = target.total_amount_due;
+    } else {
+      target.opening_balance = target.total_amount_due;
+    }
+
     target.payment_status = computePaymentStatus(target.total_amount_due, target.paid_amount, target.due_date);
     target.sync_device = device;
     target.sync_device_info = device_info;
@@ -1079,49 +1090,39 @@ export async function updateRemainingDueDirectly(
 
   setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
 
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    const { error } = await supabase.from('billing_periods').upsert(target);
-    if (error) {
-      console.error('Supabase upsert failed for billing_period:', error);
-    }
-  }
+  // Broadcast to all connected devices and Supabase cloud (non-blocking for fast UI)
+  broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name).catch(err => {
+    console.warn('Sync broadcast warning:', err);
+  });
 
-  await addAuditLog({
+  addAuditLog({
     actor_user_id: actor.id,
     actor_name: actor.name,
     entity_type: 'billing_period',
     entity_id: target.id,
     action_type: 'UPDATE',
     previous_values: { closing_balance: prevClosing },
-    new_values: { closing_balance: target.closing_balance, total_amount_due: target.total_amount_due },
+    new_values: { closing_balance: target.closing_balance, total_amount_due: target.total_amount_due, opening_balance: target.opening_balance },
     reason: reason || 'Directly edited remaining due',
-  });
+  }).catch(e => console.warn('Audit log error:', e));
 
-  // Broadcast to all connected devices
-  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
-
-  try {
-    await addLedgerHistoryEntry({
-      customer_id: target.customer_id,
-      section_id: target.section_id,
-      current_unit: target.current_unit ?? 0,
-      prev_unit: target.previous_unit ?? 0,
-      units_consumed: target.units_consumed ?? 0,
-      bill_amount: target.bill_amount,
-      opening_balance: target.opening_balance,
-      total_amount_due: target.total_amount_due,
-      paid_amount: target.paid_amount,
-      payment_method: '-',
-      closing_balance: target.closing_balance,
-      billing_month: target.billing_month,
-      billing_year: target.billing_year,
-      notes: reason || 'Directly edited remaining due',
-      actor_name: actor.name,
-    });
-  } catch (err) {
-    console.warn('Failed to record ledger history entry:', err);
-  }
+  addLedgerHistoryEntry({
+    customer_id: target.customer_id,
+    section_id: target.section_id,
+    current_unit: target.current_unit ?? 0,
+    prev_unit: target.previous_unit ?? 0,
+    units_consumed: target.units_consumed ?? 0,
+    bill_amount: target.bill_amount,
+    opening_balance: target.opening_balance,
+    total_amount_due: target.total_amount_due,
+    paid_amount: target.paid_amount,
+    payment_method: '-',
+    closing_balance: target.closing_balance,
+    billing_month: target.billing_month,
+    billing_year: target.billing_year,
+    notes: reason || 'Directly edited remaining due',
+    actor_name: actor.name,
+  }).catch(err => console.warn('Failed to record ledger history entry:', err));
 
   return target;
 }
