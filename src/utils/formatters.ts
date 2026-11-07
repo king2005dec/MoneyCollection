@@ -78,12 +78,19 @@ export function getMonthName(monthNumber: number): string {
 }
 
 export function getCurrentBillingMonth(): { month: number; year: number } {
-  // Asia/Kolkata current month & year
+  // Asia/Kolkata current month & year with 5th-to-4th billing cycle rule
   const now = new Date();
-  return {
-    month: 10, // October 2026 per context
-    year: 2026,
-  };
+  const day = now.getDate();
+  const calMonth = now.getMonth() + 1; // 1-12
+  const calYear = now.getFullYear();
+
+  if (day >= 5) {
+    return { month: calMonth, year: calYear };
+  } else {
+    const prevM = calMonth === 1 ? 12 : calMonth - 1;
+    const prevY = calMonth === 1 ? calYear - 1 : calYear;
+    return { month: prevM, year: prevY };
+  }
 }
 
 export function exportToCSV(filename: string, rows: Record<string, any>[]): void {

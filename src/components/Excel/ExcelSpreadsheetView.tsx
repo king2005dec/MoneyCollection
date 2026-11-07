@@ -447,6 +447,26 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     });
   }, [spreadsheetRows, pendingAbove499, searchQuery, startDate, endDate]);
 
+  // Apply instant in-memory update to billing periods so changes reflect with 0ms delay
+  const applyPeriodUpdate = (updated?: BillingPeriod) => {
+    if (!updated) return;
+    setBillingPeriods(prev => {
+      const idx = prev.findIndex(
+        p => p.id === updated.id ||
+             (p.customer_id === updated.customer_id &&
+              p.section_id === updated.section_id &&
+              p.billing_month === updated.billing_month &&
+              p.billing_year === updated.billing_year)
+      );
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...updated };
+        return next;
+      }
+      return [...prev, { ...updated }];
+    });
+  };
+
   // Permission-aware cell click trigger
   const handleCellClick = (
     customerId: string,
@@ -482,19 +502,6 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
     const actor = {
       id: currentUser?.id || (isOwner ? 'usr-owner-001' : 'usr-staff-001'),
       name: currentUser?.full_name || (isOwner ? 'Raj' : (currentUser?.username || 'Staff')),
-    };
-
-    const applyPeriodUpdate = (updated?: BillingPeriod) => {
-      if (!updated) return;
-      setBillingPeriods(prev => {
-        const idx = prev.findIndex(p => p.id === updated.id || (p.customer_id === updated.customer_id && p.section_id === updated.section_id && p.billing_month === updated.billing_month && p.billing_year === updated.billing_year));
-        if (idx >= 0) {
-          const next = [...prev];
-          next[idx] = { ...updated };
-          return next;
-        }
-        return [...prev, { ...updated }];
-      });
     };
 
     setSavingCell(true);
@@ -587,7 +594,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             periodId,
             { bill_amount: numVal },
             `Owner updated monthly bill to ${numVal}`,
-            actor
+            actor,
+            { customerId, sectionId, month: selectedMonth, year: selectedYear }
           );
           applyPeriodUpdate(updated);
           showUpdateToast(`Updated monthly bill to ${formatCurrency(numVal)}`);
@@ -616,7 +624,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             periodId,
             { opening_balance: numVal },
             `Owner updated previous balance to ${numVal}`,
-            actor
+            actor,
+            { customerId, sectionId, month: selectedMonth, year: selectedYear }
           );
           applyPeriodUpdate(updated);
           showUpdateToast(`Updated previous balance to ${formatCurrency(numVal)}`);
@@ -635,42 +644,32 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                  p.billing_month === selectedMonth &&
                  p.billing_year === selectedYear
           );
-          if (targetPeriod) {
-            const prevU = targetPeriod.previous_unit || 0;
-            const consumed = Math.max(0, numVal - prevU);
-            
-            let newBill = 0;
-            if (consumed <= 79) {
-              newBill = (consumed * 15) + 400;
-            } else {
-              newBill = consumed * 20;
-            }
-
-            const result = await updateBillingPeriodCharges(
-              targetPeriod.id,
-              {
-                current_unit: numVal,
-                bill_amount: newBill,
-              },
-              `Updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
-              actor
-            );
-            applyPeriodUpdate(result);
-            if (result) {
-              showUpdateToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
-            } else {
-              showToast('Failed to update meter reading. Please try again.', 'error');
-            }
+          const periodId = targetPeriod?.id || `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
+          const prevU = targetPeriod?.previous_unit || 0;
+          const consumed = Math.max(0, numVal - prevU);
+          
+          let newBill = 0;
+          if (consumed <= 79) {
+            newBill = (consumed * 15) + 400;
           } else {
-            const periodId = `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
-            const result = await updateBillingPeriodCharges(
-              periodId,
-              { current_unit: numVal },
-              `Updated meter reading to ${numVal}`,
-              actor
-            );
-            applyPeriodUpdate(result);
-            showUpdateToast(`Updated meter reading to ${numVal}!`);
+            newBill = consumed * 20;
+          }
+
+          const result = await updateBillingPeriodCharges(
+            periodId,
+            {
+              current_unit: numVal,
+              bill_amount: newBill,
+            },
+            `Updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
+            actor,
+            { customerId, sectionId, month: selectedMonth, year: selectedYear }
+          );
+          applyPeriodUpdate(result);
+          if (result) {
+            showUpdateToast(`Updated meter to ${numVal} units (${consumed} units consumed → Bill: ${formatCurrency(newBill)})!`);
+          } else {
+            showToast('Failed to update meter reading. Please try again.', 'error');
           }
         }
       } else if (field === 'prev_unit') {
@@ -692,32 +691,32 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                  p.billing_month === selectedMonth &&
                  p.billing_year === selectedYear
           );
-          if (targetPeriod) {
-            const curU = targetPeriod.current_unit || 0;
-            const consumed = Math.max(0, curU - numVal);
-            
-            let newBill = 0;
-            if (curU > 0 || numVal > 0) {
-              if (consumed <= 79) {
-                newBill = consumed > 0 ? (consumed * 15) + 400 : 0;
-              } else {
-                newBill = consumed * 20;
-              }
+          const periodId = targetPeriod?.id || `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
+          const curU = targetPeriod?.current_unit || 0;
+          const consumed = Math.max(0, curU - numVal);
+          
+          let newBill = 0;
+          if (curU > 0 || numVal > 0) {
+            if (consumed <= 79) {
+              newBill = consumed > 0 ? (consumed * 15) + 400 : 0;
+            } else {
+              newBill = consumed * 20;
             }
-
-            const result = await updateBillingPeriodCharges(
-              targetPeriod.id,
-              {
-                previous_unit: numVal,
-                units_consumed: consumed,
-                bill_amount: newBill,
-              },
-              `Owner updated previous meter unit to ${numVal} (Consumed: ${consumed} units → Bill: ${formatCurrency(newBill)})`,
-              actor
-            );
-            applyPeriodUpdate(result);
-            showUpdateToast(`Updated previous unit to ${numVal} (Consumed: ${consumed} units → Bill: ${formatCurrency(newBill)})`);
           }
+
+          const result = await updateBillingPeriodCharges(
+            periodId,
+            {
+              previous_unit: numVal,
+              units_consumed: consumed,
+              bill_amount: newBill,
+            },
+            `Owner updated previous meter unit to ${numVal} (Consumed: ${consumed} units → Bill: ${formatCurrency(newBill)})`,
+            actor,
+            { customerId, sectionId, month: selectedMonth, year: selectedYear }
+          );
+          applyPeriodUpdate(result);
+          showUpdateToast(`Updated previous unit to ${numVal} (Consumed: ${consumed} units → Bill: ${formatCurrency(newBill)})`);
         }
       }
 
@@ -770,7 +769,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       }
 
       const periodId = balanceModalCustomer.period?.id || `bp-${balanceModalCustomer.customer.id}-${balanceModalCustomer.sectionId}-${selectedMonth}-${selectedYear}`;
-      await addCollection(
+      const collRes = await addCollection(
         {
           customer_id: balanceModalCustomer.customer.id,
           section_id: balanceModalCustomer.sectionId,
@@ -786,12 +785,16 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         actor
       );
 
+      if (collRes?.updatedPeriod) {
+        applyPeriodUpdate(collRes.updatedPeriod);
+      }
+
       showUpdateToast(`Payment of ${formatCurrency(payNum)} recorded successfully for ${balanceModalCustomer.customer.full_name}! Remaining balance updated.`);
       setBalanceModalCustomer(null);
       const freshPeriods = await getBillingPeriods();
-      if (freshPeriods.length > 0) setBillingPeriods(freshPeriods);
+      if (freshPeriods.length > 0) setBillingPeriods([...freshPeriods]);
       const freshCols = await getCollections();
-      if (freshCols.length > 0) setCollections(freshCols);
+      if (freshCols.length > 0) setCollections([...freshCols]);
       triggerDbRefresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to record payment', 'error');
@@ -810,7 +813,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
     const periodId = upiModalData.periodId || `bp-${upiModalData.customerId}-${upiModalData.sectionId}-${selectedMonth}-${selectedYear}`;
     try {
-      await addCollection(
+      const collRes = await addCollection(
         {
           customer_id: upiModalData.customerId,
           section_id: upiModalData.sectionId,
@@ -825,12 +828,15 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         },
         actor
       );
+      if (collRes?.updatedPeriod) {
+        applyPeriodUpdate(collRes.updatedPeriod);
+      }
       showUpdateToast(`Received UPI payment of ${formatCurrency(paidAmount)} for ${upiModalData.customerName}!`);
       setUpiModalData(null);
       const freshPeriods = await getBillingPeriods();
-      if (freshPeriods.length > 0) setBillingPeriods(freshPeriods);
+      if (freshPeriods.length > 0) setBillingPeriods([...freshPeriods]);
       const freshCols = await getCollections();
-      if (freshCols.length > 0) setCollections(freshCols);
+      if (freshCols.length > 0) setCollections([...freshCols]);
       triggerDbRefresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to record UPI payment', 'error');
@@ -1007,7 +1013,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         }
       }
 
-      await updateBillingPeriodCharges(
+      const createdPeriod = await updateBillingPeriodCharges(
         periodId,
         {
           current_unit: curUnitVal,
@@ -1016,8 +1022,12 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
           opening_balance: initBalVal,
         },
         'Initial setup by owner from Ledger view',
-        actor
+        actor,
+        { customerId: created.id, sectionId: targetSecId, month: selectedMonth, year: selectedYear }
       );
+      if (createdPeriod) {
+        applyPeriodUpdate(createdPeriod);
+      }
 
       showUpdateToast(`Resident ${created.full_name} (${created.customer_code}) created successfully!`);
       setIsAddResidentOpen(false);
@@ -2214,17 +2224,17 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
               <td colSpan={2} className="py-2.5 px-3 text-right uppercase tracking-wider text-xs border-r border-slate-300">
                 Grand Total ({filteredRows.length} rows):
               </td>
+              <td className="py-2.5 px-3 text-right text-emerald-900 bg-emerald-100 border-r border-slate-300 text-xs">
+                {formatCurrency(totals.totalPay)}
+              </td>
               <td className="py-2.5 px-3 text-right text-rose-900 bg-rose-100 border-r border-slate-300 text-xs">
                 {formatCurrency(totals.totalThisMonth)}
               </td>
               <td className="py-2.5 px-3 text-right text-amber-900 bg-amber-100 border-r border-slate-300 text-xs">
                 {formatCurrency(totals.totalPrevBalance)}
               </td>
-              <td className="py-2.5 px-3 text-right border-r border-slate-300 text-xs">
+              <td className="py-2.5 px-3 text-right font-extrabold bg-slate-100 border-r border-slate-300 text-xs">
                 {formatCurrency(totals.totalGrandBalance)}
-              </td>
-              <td className="py-2.5 px-3 text-right text-emerald-900 bg-emerald-100 border-r border-slate-300 text-xs">
-                {formatCurrency(totals.totalPay)}
               </td>
               <td className="py-2.5 px-3 text-right text-rose-700 bg-rose-100 text-xs font-black border-r border-slate-300">
                 {formatCurrency(totals.totalCurrentBalance)}

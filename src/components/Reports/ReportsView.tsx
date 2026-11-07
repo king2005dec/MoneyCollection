@@ -20,7 +20,7 @@ import {
   getAuditLogs,
 } from '../../services/databaseService';
 import { Breadcrumbs } from '../Breadcrumbs';
-import { formatCurrency, formatDateTime, exportToCSV, getMonthName } from '../../utils/formatters';
+import { formatCurrency, formatDateTime, exportToCSV, getMonthName, getCurrentBillingMonth } from '../../utils/formatters';
 import {
   BarChart3,
   FileSpreadsheet,
@@ -62,8 +62,9 @@ export const ReportsView: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   // Filters
-  const [selectedMonth, setSelectedMonth] = useState<number>(10);
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const currentCycle = getCurrentBillingMonth();
+  const [selectedMonth, setSelectedMonth] = useState<number>(currentCycle.month);
+  const [selectedYear, setSelectedYear] = useState<number>(currentCycle.year);
   const [selectedSection, setSelectedSection] = useState<string>('all');
   const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
 

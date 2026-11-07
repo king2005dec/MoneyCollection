@@ -602,9 +602,54 @@ export async function deleteCustomer(
 // -------------------------------------------------------------
 // BILLING PERIODS
 // -------------------------------------------------------------
+function sanitizeBillingPeriods(periods: BillingPeriod[]): BillingPeriod[] {
+  if (!Array.isArray(periods)) return [];
+  const map = new Map<string, BillingPeriod>();
+
+  for (const p of periods) {
+    if (!p || !p.id) continue;
+    // Auto-repair corrupt customer_id / section_id
+    if (p.customer_id === 'cust' || !p.customer_id || (p.section_id === 'sec-elec-001' && (p.id.includes('sec-other') || p.id.includes('sec-water')))) {
+      const match = p.id.match(/^bp-(.+?)-(sec-[a-z0-9-]+)-(\d{1,2})-(\d{4})$/);
+      if (match) {
+        p.customer_id = match[1];
+        p.section_id = match[2];
+        p.billing_month = parseInt(match[3], 10);
+        p.billing_year = parseInt(match[4], 10);
+      }
+    }
+
+    const key = `${p.customer_id}|${p.section_id}|${p.billing_month}|${p.billing_year}`;
+    if (!map.has(key)) {
+      map.set(key, p);
+    } else {
+      // Merge with existing duplicate
+      const existing = map.get(key)!;
+      existing.paid_amount = Math.max(existing.paid_amount || 0, p.paid_amount || 0);
+      existing.current_unit = Math.max(existing.current_unit || 0, p.current_unit || 0);
+      existing.previous_unit = Math.max(existing.previous_unit || 0, p.previous_unit || 0);
+      existing.units_consumed = Math.max(existing.units_consumed || 0, p.units_consumed || 0);
+      if ((p.bill_amount || 0) > 0) existing.bill_amount = p.bill_amount;
+      if ((p.opening_balance || 0) > 0 && !existing.opening_balance) existing.opening_balance = p.opening_balance;
+      const prevB = existing.opening_balance || 0;
+      const thisM = Number(((existing.bill_amount || 0) + (existing.additional_charges || 0) - (existing.credits_or_adjustments || 0)).toFixed(2));
+      existing.total_amount_due = Number((prevB + thisM).toFixed(2));
+      existing.closing_balance = Math.max(0, Number((existing.total_amount_due - existing.paid_amount).toFixed(2)));
+    }
+  }
+
+  return Array.from(map.values());
+}
+
 export async function getBillingPeriods(): Promise<BillingPeriod[]> {
   const local = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, []);
-  if (local && local.length > 0) return local;
+  if (local && local.length > 0) {
+    const sanitized = sanitizeBillingPeriods(local);
+    if (sanitized.length !== local.length || local.some(p => p.customer_id === 'cust')) {
+      setStored(STORAGE_KEYS.BILLING_PERIODS, sanitized);
+    }
+    return sanitized;
+  }
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
@@ -614,8 +659,9 @@ export async function getBillingPeriods(): Promise<BillingPeriod[]> {
         .eq('key', STORAGE_KEYS.BILLING_PERIODS)
         .maybeSingle();
       if (!error && data?.value && Array.isArray(data.value) && data.value.length > 0) {
-        setStored(STORAGE_KEYS.BILLING_PERIODS, data.value);
-        return data.value as BillingPeriod[];
+        const sanitized = sanitizeBillingPeriods(data.value as BillingPeriod[]);
+        setStored(STORAGE_KEYS.BILLING_PERIODS, sanitized);
+        return sanitized;
       }
     } catch (e) {
       console.warn('Supabase getBillingPeriods error:', e);
@@ -644,18 +690,36 @@ export async function updateBillingPeriodCharges(
     units_consumed?: number;
   },
   reason: string,
-  actor: { id: string; name: string }
+  actor: { id: string; name: string },
+  context?: { customerId?: string; sectionId?: string; month?: number; year?: number }
 ): Promise<BillingPeriod | undefined> {
   const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
   let target = periods.find(p => p.id === id);
+  if (!target && context?.customerId) {
+    target = periods.find(p =>
+      p.customer_id === context.customerId &&
+      p.section_id === (context.sectionId || 'sec-elec-001') &&
+      p.billing_month === (context.month || 10) &&
+      p.billing_year === (context.year || 2026)
+    );
+  }
+
   const { device, device_info, timestamp } = getDeviceInfo();
 
   if (!target) {
-    const parts = id.split('-');
-    const parsedMonth = parseInt(parts[parts.length - 2], 10) || 10;
-    const parsedYear = parseInt(parts[parts.length - 1], 10) || 2026;
-    const customerId = parts[1] || '';
-    const sectionId = parts[2] && parts[2].startsWith('sec') ? `${parts[2]}-${parts[3]}-${parts[4]}` : 'sec-elec-001';
+    let customerId = context?.customerId || '';
+    let sectionId = context?.sectionId || 'sec-elec-001';
+    let parsedMonth = context?.month || 10;
+    let parsedYear = context?.year || 2026;
+
+    const match = id.match(/^bp-(cust-[A-Za-z0-9]+)-(sec-[a-z0-9-]+)-(\d+)-(\d+)$/);
+    if (match) {
+      customerId = match[1];
+      sectionId = match[2];
+      parsedMonth = parseInt(match[3], 10);
+      parsedYear = parseInt(match[4], 10);
+    }
+
     target = {
       id,
       customer_id: customerId,
@@ -862,11 +926,11 @@ export async function updateOwnerPaymentDirectly(
 ): Promise<BillingPeriod> {
   const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
   let target = periods.find(
-    p => p.customer_id === customerId &&
+    p => (p.customer_id === customerId || p.customer_id === customerId.replace(/^cust-/, '')) &&
          p.section_id === sectionId &&
          p.billing_month === month &&
          p.billing_year === year
-  );
+  ) || periods.find(p => p.id === `bp-${customerId}-${sectionId}-${month}-${year}`);
 
   const { device, device_info, timestamp } = getDeviceInfo();
   const safePay = Math.max(0, Number(newPayAmount.toFixed(2)));
@@ -1031,11 +1095,11 @@ export async function updateRemainingDueDirectly(
 ): Promise<BillingPeriod> {
   const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
   let target = periods.find(
-    p => p.customer_id === customerId &&
+    p => (p.customer_id === customerId || p.customer_id === customerId.replace(/^cust-/, '')) &&
          p.section_id === sectionId &&
          p.billing_month === month &&
          p.billing_year === year
-  );
+  ) || periods.find(p => p.id === `bp-${customerId}-${sectionId}-${month}-${year}`);
 
   const { device, device_info, timestamp } = getDeviceInfo();
   const safeDue = Math.max(0, Number(newRemainingDue.toFixed(2)));
@@ -1334,7 +1398,7 @@ export async function getCollections(): Promise<Collection[]> {
 export async function addCollection(
   paymentData: Omit<Collection, 'id' | 'receipt_number' | 'created_at' | 'updated_at' | 'status'>,
   actor: { id: string; name: string }
-): Promise<Collection> {
+): Promise<Collection & { updatedPeriod?: BillingPeriod }> {
   const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
   const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
 
@@ -1365,16 +1429,26 @@ export async function addCollection(
     updated_at: new Date().toISOString(),
   };
 
-  // Update or create billing period
-  let period = periods.find(p => p.id === paymentData.billing_period_id);
+  // Extract month and year from collection_date or billing_period_id
+  let bMonth = new Date(collDate).getMonth() + 1;
+  let bYear = new Date(collDate).getFullYear();
+  const idMatch = paymentData.billing_period_id.match(/-(\d{1,2})-(\d{4})$/);
+  if (idMatch) {
+    bMonth = parseInt(idMatch[1], 10);
+    bYear = parseInt(idMatch[2], 10);
+  }
+
+  // Find target period by exact ID or by customer_id + section_id + month + year
+  let period = periods.find(p => 
+    p.id === paymentData.billing_period_id ||
+    (p.customer_id === paymentData.customer_id &&
+     p.section_id === paymentData.section_id &&
+     p.billing_month === bMonth &&
+     p.billing_year === bYear)
+  );
+
   if (!period) {
-    // Parse billing month/year from billing_period_id: bp-{customerId}-{sectionId}-{month}-{year}
-    const idParts = paymentData.billing_period_id.split('-');
-    const parsedMonth = idParts[idParts.length - 2];
-    const parsedYear = idParts[idParts.length - 1];
-    const bMonth = parsedMonth ? parseInt(parsedMonth, 10) : new Date().getMonth() + 1;
-    const bYear = parsedYear ? parseInt(parsedYear, 10) : new Date().getFullYear();
-    const dueDay = new Date(collDate).getDate() || 5;
+    const dueDay = 5;
     period = {
       id: paymentData.billing_period_id,
       customer_id: paymentData.customer_id,
@@ -1420,17 +1494,12 @@ export async function addCollection(
 
   const supabase = getSupabaseClient();
   if (supabase) {
-    try {
-      await supabase.from('collections').insert(newCollection);
-      if (period) {
-        await supabase.from('billing_periods').upsert(period);
-      }
-    } catch (e) {
-      console.warn('Supabase sync error in addCollection:', e);
-    }
+    supabase.from('collections').insert(newCollection).then(() => {
+      if (period) supabase.from('billing_periods').upsert(period);
+    }).catch(e => console.warn('Supabase sync warning in addCollection:', e));
   }
 
-  await addAuditLog({
+  addAuditLog({
     actor_user_id: actor.id,
     actor_name: actor.name,
     entity_type: 'collection',
@@ -1444,36 +1513,35 @@ export async function addCollection(
       device: newCollection.sync_device,
     },
     reason: 'Recorded payment collection',
+  }).catch(e => console.warn('Audit log warning:', e));
+
+  // Broadcast updated billing_periods + collections to all connected devices (non-blocking)
+  broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS], actor?.name).catch(e => {
+    console.warn('Sync broadcast warning:', e);
   });
 
-  // Broadcast updated billing_periods + collections to all connected devices
-  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.COLLECTIONS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
-
   if (period) {
-    try {
-      await addLedgerHistoryEntry({
-        customer_id: newCollection.customer_id,
-        section_id: newCollection.section_id,
-        current_unit: period.current_unit ?? 0,
-        prev_unit: period.previous_unit ?? 0,
-        units_consumed: period.units_consumed ?? 0,
-        bill_amount: period.bill_amount,
-        opening_balance: period.opening_balance,
-        total_amount_due: period.total_amount_due,
-        paid_amount: period.paid_amount,
-        payment_method: newCollection.payment_method || 'Cash',
-        closing_balance: period.closing_balance,
-        billing_month: period.billing_month,
-        billing_year: period.billing_year,
-        notes: `Payment of ₹${newCollection.amount} (${newCollection.payment_method})`,
-        actor_name: actor.name,
-      });
-    } catch (err) {
-      console.warn('Failed to record ledger history entry on payment:', err);
-    }
+    addLedgerHistoryEntry({
+      customer_id: newCollection.customer_id,
+      section_id: newCollection.section_id,
+      current_unit: period.current_unit ?? 0,
+      prev_unit: period.previous_unit ?? 0,
+      units_consumed: period.units_consumed ?? 0,
+      bill_amount: period.bill_amount,
+      opening_balance: period.opening_balance,
+      total_amount_due: period.total_amount_due,
+      paid_amount: period.paid_amount,
+      payment_method: newCollection.payment_method || 'Cash',
+      closing_balance: period.closing_balance,
+      billing_month: period.billing_month,
+      billing_year: period.billing_year,
+      notes: `Payment of ₹${newCollection.amount} (${newCollection.payment_method})`,
+      actor_name: actor.name,
+    }).catch(err => console.warn('Ledger history warning:', err));
   }
 
-  return newCollection;
+  const resultWithPeriod = { ...newCollection, updatedPeriod: period };
+  return resultWithPeriod;
 }
 
 export async function updateCollection(
@@ -1711,108 +1779,19 @@ export async function addAuditLog(entry: Omit<AuditLog, 'id' | 'created_at'>): P
 
 // -------------------------------------------------------------
 // DATE RANGE BALANCE MONITORING (5th-to-5th billing cycle)
-// Meter data runs 5th of month → 5th of next month.
-// If current date exceeds the end date (5th of current month),
-// automatically revert closing_balance to opening_balance
-// (previous balance) for expired billing periods.
+// DISABLED: Auto-close was incorrectly reverting balances after payments.
+// All balance management is now done manually by Owner.
 // -------------------------------------------------------------
-export async function autoCloseExpiredBillingPeriods(actor?: { id: string; name: string }): Promise<{ closedCount: number }> {
-  const settings = await getSystemSettings();
-
-  const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
-
-  // Respect cycle start date (default 10/05/2026)
-  let startDate: Date | null = null;
-  if (settings.balanceMonitorStartDate) {
-    const parts = settings.balanceMonitorStartDate.split('/');
-    if (parts.length === 3) {
-      startDate = new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10), 0, 0, 0);
-    }
-  } else {
-    startDate = new Date(2026, 9, 5, 0, 0, 0); // default 10/05/2026
-  }
-
-  // Do not run before the cycle start date
-  if (startDate && now < startDate) return { closedCount: 0 };
-
-  // Use configured end date if provided, otherwise default to 5th-to-5th cycle
-  let endDate: Date;
-  let endLabel: string;
-  if (settings.balanceMonitorEndDate) {
-    const parts = settings.balanceMonitorEndDate.split('/');
-    if (parts.length === 3) {
-      endDate = new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10), 23, 59, 59);
-      endLabel = settings.balanceMonitorEndDate;
-    } else {
-      endDate = new Date(now.getFullYear(), now.getMonth(), 5, 23, 59, 59);
-      endLabel = `${String(now.getMonth() + 1).padStart(2, '0')}/05/${now.getFullYear()}`;
-    }
-  } else {
-    // Default: end date = 5th of current month
-    endDate = new Date(now.getFullYear(), now.getMonth(), 5, 23, 59, 59);
-    endLabel = `${String(now.getMonth() + 1).padStart(2, '0')}/05/${now.getFullYear()}`;
-  }
-
-  // Only act if current date exceeds end date
-  if (now <= endDate) return { closedCount: 0 };
-
-  const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
-  let closedCount = 0;
-  let changed = false;
-
-  for (const period of periods) {
-    if (period.closing_balance > 0 && period.closing_balance !== period.opening_balance) {
-      const prevClosing = period.closing_balance;
-      period.closing_balance = period.opening_balance; // revert to previous balance
-      period.total_amount_due = Number((period.paid_amount + period.closing_balance).toFixed(2));
-      period.payment_status = computePaymentStatus(period.total_amount_due, period.paid_amount, period.due_date);
-      period.updated_at = new Date().toISOString();
-      changed = true;
-      closedCount++;
-
-      await addAuditLog({
-        actor_user_id: actor?.id || 'system',
-        actor_name: actor?.name || 'System',
-        entity_type: 'billing_period',
-        entity_id: period.id,
-        action_type: 'STATUS_CHANGE',
-        previous_values: { closing_balance: prevClosing },
-        new_values: { closing_balance: period.closing_balance },
-        reason: `Auto-closed expired 5th-to-5th cycle (past ${endLabel}): reverted current balance to previous balance`,
-      });
-    }
-  }
-
-  if (changed) {
-    setStored(STORAGE_KEYS.BILLING_PERIODS, periods);
-    await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
-  }
-
-  return { closedCount };
+export async function autoCloseExpiredBillingPeriods(_actor?: { id: string; name: string }): Promise<{ closedCount: number }> {
+  // Auto-close is DISABLED to prevent overriding actual payments.
+  // Owner manually manages billing periods.
+  return { closedCount: 0 };
 }
 
-// Helper: check and auto-close on every app load / periodic tick
-export function scheduleBalanceMonitor(intervalMs: number = 60000): () => void {
-  let timer: ReturnType<typeof setInterval> | null = null;
-
-  const runCheck = async () => {
-    try {
-      await autoCloseExpiredBillingPeriods();
-    } catch (e) {
-      console.warn('[BalanceMonitor] auto-close check failed:', e);
-    }
-  };
-
-  // Run immediately once
-  runCheck();
-
-  // Then poll at the given interval
-  timer = setInterval(runCheck, intervalMs);
-
-  return () => {
-    if (timer) clearInterval(timer);
-  };
+// Helper: schedule is kept for compatibility but does nothing now
+export function scheduleBalanceMonitor(_intervalMs: number = 60000): () => void {
+  // Auto-close monitoring is disabled — no background balance resets.
+  return () => {};
 }
 
 // -------------------------------------------------------------
