@@ -334,7 +334,7 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
       : activeTab;
 
     const period = billingPeriods.find(
-      p => p.customer_id === cust.id &&
+      p => (p.customer_id === cust.id || p.customer_id === cust.customer_code || p.customer_id === cust.id.replace(/^cust-/, '')) &&
            p.section_id === targetSectionId &&
            p.billing_month === selectedMonth &&
            p.billing_year === selectedYear
@@ -342,16 +342,27 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
     const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
     const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
-    const prevPeriod = billingPeriods.find(
-      p => p.customer_id === cust.id &&
+    let prevPeriod = billingPeriods.find(
+      p => (p.customer_id === cust.id || p.customer_id === cust.customer_code || p.customer_id === cust.id.replace(/^cust-/, '')) &&
            p.section_id === targetSectionId &&
            p.billing_month === prevMonth &&
            p.billing_year === prevYear
     );
 
-    const prevBalance = period
-      ? (period.opening_balance ?? 0)
-      : (prevPeriod ? Math.max(0, prevPeriod.closing_balance) : 0);
+    if (!prevPeriod) {
+      const pastPeriods = billingPeriods.filter(
+        p => (p.customer_id === cust.id || p.customer_id === cust.customer_code || p.customer_id === cust.id.replace(/^cust-/, '')) &&
+             p.section_id === targetSectionId &&
+             (p.billing_year < selectedYear || (p.billing_year === selectedYear && p.billing_month < selectedMonth))
+      ).sort((a, b) => (b.billing_year * 12 + b.billing_month) - (a.billing_year * 12 + a.billing_month));
+      if (pastPeriods.length > 0) {
+        prevPeriod = pastPeriods[0];
+      }
+    }
+
+    const prevBalance = (period && period.opening_balance !== undefined && period.opening_balance > 0)
+      ? period.opening_balance
+      : (prevPeriod ? Math.max(0, prevPeriod.closing_balance) : (period?.opening_balance ?? 0));
 
     const thisMonth = period
       ? Number(((period.bill_amount ?? 0) + (period.additional_charges ?? 0) - (period.credits_or_adjustments ?? 0)).toFixed(2))
@@ -372,10 +383,13 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
 
     const currentBalance = Math.max(0, Number((totalBalance - pay).toFixed(2)));
 
-    // Meter readings
+    // Meter readings:
+    // In new month, last month's current_unit becomes new month's prev_unit!
     const currentUnit = period?.current_unit ?? 0;
-    const prevUnit = period?.previous_unit ?? 0;
-    const unitsConsumed = period?.units_consumed ?? Math.max(0, currentUnit - prevUnit);
+    const prevUnit = (period && period.previous_unit !== undefined && period.previous_unit > 0)
+      ? period.previous_unit
+      : (prevPeriod ? (prevPeriod.current_unit ?? 0) : (period?.previous_unit ?? 0));
+    const unitsConsumed = period?.units_consumed ?? (currentUnit > 0 ? Math.max(0, currentUnit - prevUnit) : 0);
 
     return {
       customer: cust,
@@ -645,7 +659,21 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
                  p.billing_year === selectedYear
           );
           const periodId = targetPeriod?.id || `bp-${customerId}-${sectionId}-${selectedMonth}-${selectedYear}`;
-          const prevU = targetPeriod?.previous_unit || 0;
+          let prevU = targetPeriod?.previous_unit || 0;
+          if (prevU === 0) {
+            const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
+            const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
+            const prevP = billingPeriods.find(
+              p => (p.customer_id === customerId || p.customer_id === customerId.replace(/^cust-/, '')) &&
+                   p.section_id === sectionId &&
+                   p.billing_month === prevMonth &&
+                   p.billing_year === prevYear
+            );
+            if (prevP && (prevP.current_unit || 0) > 0) {
+              prevU = prevP.current_unit || 0;
+            }
+          }
+
           const consumed = Math.max(0, numVal - prevU);
           
           let newBill = 0;
@@ -659,6 +687,8 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
             periodId,
             {
               current_unit: numVal,
+              previous_unit: prevU,
+              units_consumed: consumed,
               bill_amount: newBill,
             },
             `Updated meter reading to ${numVal} (Consumed: ${consumed} units)`,
@@ -897,8 +927,16 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         id: currentUser?.id || 'usr-owner-001',
         name: currentUser?.full_name || 'Raj',
       };
-      await deleteCustomer(deleteConfirmRow.customer.id, actor);
-      showToast(`Deleted resident ${deleteConfirmRow.name} (${deleteConfirmRow.customerCode}) from ledger.`);
+      const deletedCustId = deleteConfirmRow.customer.id;
+      const deletedCustCode = deleteConfirmRow.customerCode;
+
+      await deleteCustomer(deletedCustId, actor);
+
+      // Immediately remove from in-memory state for instant 0ms response
+      setCustomers(prev => prev.filter(c => c.id !== deletedCustId && c.customer_code !== deletedCustCode));
+      setBillingPeriods(prev => prev.filter(p => p.customer_id !== deletedCustId && p.customer_id !== deletedCustCode));
+
+      showToast(`Deleted resident ${deleteConfirmRow.name} (${deletedCustCode}) from ledger.`);
       setDeleteConfirmRow(null);
       markUpdated();
       triggerDbRefresh();
@@ -942,10 +980,15 @@ export const ExcelSpreadsheetView: React.FC<ExcelSpreadsheetViewProps> = ({
         actor
       );
 
+      const freshPeriods = await getBillingPeriods();
+      if (freshPeriods.length > 0) {
+        setBillingPeriods([...freshPeriods]);
+      }
+
       setSelectedMonth(targetNextMonth);
       setSelectedYear(targetNextYear);
       setIsNextMonthModalOpen(false);
-      showUpdateToast(`Created next month's billing cycle for ${getMonthName(targetNextMonth)} ${targetNextYear}! (${result.countCreated} records updated)`);
+      showUpdateToast(`Created next month's billing cycle for ${getMonthName(targetNextMonth)} ${targetNextYear}! Carried forward last month's unit → prev unit, and current balance → prev balance.`);
       triggerDbRefresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to generate next month bill', 'error');

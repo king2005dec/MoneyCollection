@@ -572,31 +572,66 @@ export async function deleteCustomer(
   actor: { id: string; name: string }
 ): Promise<void> {
   const customers = getStored<Customer[]>(STORAGE_KEYS.CUSTOMERS, INITIAL_CUSTOMERS);
-  const target = customers.find(c => c.id === id);
+  const target = customers.find(c => c.id === id || c.customer_code === id || c.customer_code === id.replace(/^cust-/, ''));
   if (!target) return;
 
-  const remaining = customers.filter(c => c.id !== id);
+  const targetId = target.id;
+  const targetCode = target.customer_code;
+
+  const remaining = customers.filter(c => c.id !== targetId && c.customer_code !== targetCode);
   setStored(STORAGE_KEYS.CUSTOMERS, remaining);
 
   const billingPeriods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
-  const remainingPeriods = billingPeriods.filter(p => p.customer_id !== id);
+  const remainingPeriods = billingPeriods.filter(
+    p => p.customer_id !== targetId &&
+         p.customer_id !== targetCode &&
+         p.customer_id !== targetId.replace(/^cust-/, '') &&
+         !p.id.includes(`-${targetId}-`) &&
+         !p.id.includes(`-${targetCode}-`)
+  );
   setStored(STORAGE_KEYS.BILLING_PERIODS, remainingPeriods);
+
+  const collections = getStored<Collection[]>(STORAGE_KEYS.COLLECTIONS, INITIAL_COLLECTIONS);
+  const remainingCollections = collections.filter(
+    c => c.customer_id !== targetId && c.customer_id !== targetCode
+  );
+  setStored(STORAGE_KEYS.COLLECTIONS, remainingCollections);
+
+  const ledgerHistory = getStored<LedgerHistoryEntry[]>(STORAGE_KEYS.LEDGER_HISTORY, []);
+  const remainingLedger = ledgerHistory.filter(
+    h => h.customer_id !== targetId && h.customer_id !== targetCode
+  );
+  setStored(STORAGE_KEYS.LEDGER_HISTORY, remainingLedger);
 
   const supabase = getSupabaseClient();
   if (supabase) {
-    await supabase.from('customers').delete().eq('id', id);
-    await supabase.from('billing_periods').delete().eq('customer_id', id);
+    try {
+      await supabase.from('customers').delete().eq('id', targetId);
+      await supabase.from('billing_periods').delete().eq('customer_id', targetId);
+      await supabase.from('collections').delete().eq('customer_id', targetId);
+    } catch (e) {
+      console.warn('Supabase deleteCustomer error:', e);
+    }
   }
 
   await addAuditLog({
     actor_user_id: actor.id,
     actor_name: actor.name,
     entity_type: 'customer',
-    entity_id: id,
+    entity_id: targetId,
     action_type: 'DELETE',
     previous_values: { code: target.customer_code, name: target.full_name },
     reason: `Deleted resident ${target.full_name} (${target.customer_code})`,
   });
+
+  // Broadcast deletion to all staff devices and update Supabase system_settings in real time
+  await broadcastDataSync([
+    STORAGE_KEYS.CUSTOMERS,
+    STORAGE_KEYS.BILLING_PERIODS,
+    STORAGE_KEYS.COLLECTIONS,
+    STORAGE_KEYS.LEDGER_HISTORY,
+    STORAGE_KEYS.AUDIT_LOGS,
+  ], actor?.name);
 }
 
 // -------------------------------------------------------------
@@ -1297,35 +1332,49 @@ export async function carryForwardMonth(
   const periods = getStored<BillingPeriod[]>(STORAGE_KEYS.BILLING_PERIODS, INITIAL_BILLING_PERIODS);
   let countCreated = 0;
 
-  const dueDate = `${targetYear}-${targetMonth.toString().padStart(2, '0')}-${defaultDueDay.toString().padStart(2, '0')}`;
   const dueDay = defaultDueDay; // billing due date is 5th of month as requested
-
   const { device, device_info, timestamp } = getDeviceInfo();
 
   for (const customer of customers) {
     if (!customer.is_active) continue;
 
     for (const sectionId of customer.assigned_section_ids) {
-      // Check if period already exists
-      const exists = periods.some(
-        p => p.customer_id === customer.id &&
+      // 1. Find previous period: match by exact customerId or stripped customer_code
+      let prevPeriod = periods.find(
+        p => (p.customer_id === customer.id || p.customer_id === customer.customer_code || p.customer_id === customer.id.replace(/^cust-/, '')) &&
+             p.section_id === sectionId &&
+             p.billing_month === prevMonth &&
+             p.billing_year === prevYear
+      );
+
+      // Fallback: If not found in exact prevMonth, find the latest available period before targetMonth/targetYear
+      if (!prevPeriod) {
+        const pastPeriods = periods.filter(
+          p => (p.customer_id === customer.id || p.customer_id === customer.customer_code || p.customer_id === customer.id.replace(/^cust-/, '')) &&
+               p.section_id === sectionId &&
+               (p.billing_year < targetYear || (p.billing_year === targetYear && p.billing_month < targetMonth))
+        ).sort((a, b) => (b.billing_year * 12 + b.billing_month) - (a.billing_year * 12 + a.billing_month));
+        if (pastPeriods.length > 0) {
+          prevPeriod = pastPeriods[0];
+        }
+      }
+
+      // STRICT USER RULE:
+      // 1) Last month's current balance (closing_balance) becomes new month's prev balance (opening_balance)
+      const openingBalance = prevPeriod ? Math.max(0, prevPeriod.closing_balance) : 0.00;
+
+      // 2) Last month's current unit becomes new month's previous unit
+      const lastCurrentUnit = prevPeriod ? (prevPeriod.current_unit ?? 0) : 0;
+
+      // Check if target period already exists
+      let targetPeriod = periods.find(
+        p => (p.customer_id === customer.id || p.customer_id === customer.customer_code || p.customer_id === customer.id.replace(/^cust-/, '')) &&
              p.section_id === sectionId &&
              p.billing_month === targetMonth &&
              p.billing_year === targetYear
       );
 
-      if (!exists) {
-        // Find previous period closing balance - carry forward automatically
-        const prevPeriod = periods.find(
-          p => p.customer_id === customer.id &&
-               p.section_id === sectionId &&
-               p.billing_month === prevMonth &&
-               p.billing_year === prevYear
-        );
-
-        const openingBalance = prevPeriod ? Math.max(0, prevPeriod.closing_balance) : 0.00;
-        const lastCurrentUnit = prevPeriod ? (prevPeriod.current_unit ?? 0) : 0;
-
+      if (!targetPeriod) {
         periods.push({
           id: `bp-${customer.id}-${sectionId}-${targetMonth}-${targetYear}`,
           customer_id: customer.id,
@@ -1341,8 +1390,8 @@ export async function carryForwardMonth(
           closing_balance: openingBalance,
           due_date: `${targetYear}-${targetMonth.toString().padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
           payment_status: openingBalance > 0 ? 'Pending' : 'Paid',
-          current_unit: lastCurrentUnit,
-          previous_unit: lastCurrentUnit,
+          current_unit: 0, // In new month, current unit is empty (0) until meter reading is entered
+          previous_unit: lastCurrentUnit, // Carried forward from last month's current unit!
           units_consumed: 0,
           sync_device: device,
           sync_device_info: device_info,
@@ -1351,6 +1400,27 @@ export async function carryForwardMonth(
           updated_at: new Date().toISOString(),
         });
         countCreated++;
+      } else {
+        // If targetPeriod already exists, carry forward last month values if not yet customized
+        let modified = false;
+        if (targetPeriod.previous_unit === 0 && lastCurrentUnit > 0) {
+          targetPeriod.previous_unit = lastCurrentUnit;
+          modified = true;
+        }
+        if (targetPeriod.opening_balance === 0 && openingBalance > 0 && (targetPeriod.paid_amount || 0) === 0) {
+          targetPeriod.opening_balance = openingBalance;
+          targetPeriod.total_amount_due = Number((openingBalance + (targetPeriod.bill_amount || 0)).toFixed(2));
+          targetPeriod.closing_balance = Math.max(0, Number((targetPeriod.total_amount_due - (targetPeriod.paid_amount || 0)).toFixed(2)));
+          targetPeriod.payment_status = targetPeriod.closing_balance > 0 ? 'Pending' : 'Paid';
+          modified = true;
+        }
+        if (modified) {
+          targetPeriod.sync_device = device;
+          targetPeriod.sync_device_info = device_info;
+          targetPeriod.sync_timestamp = timestamp;
+          targetPeriod.updated_at = new Date().toISOString();
+          countCreated++;
+        }
       }
     }
   }
@@ -1364,8 +1434,11 @@ export async function carryForwardMonth(
     entity_id: `batch-${targetMonth}-${targetYear}`,
     action_type: 'CREATE',
     new_values: { targetMonth, targetYear, periodsGenerated: countCreated },
-    reason: `Generated monthly billing period for ${targetMonth}/${targetYear} with carried forward balances`,
+    reason: `Generated monthly billing period for ${targetMonth}/${targetYear} with carried forward balances & meter units`,
   });
+
+  // Broadcast to all staff devices and push updated state to Supabase system_settings in real time
+  await broadcastDataSync([STORAGE_KEYS.BILLING_PERIODS, STORAGE_KEYS.AUDIT_LOGS], actor?.name);
 
   return { countCreated };
 }
