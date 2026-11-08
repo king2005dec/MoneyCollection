@@ -23,6 +23,7 @@ import {
   INITIAL_SETTINGS,
 } from './seedData';
 import { getSupabaseClient } from './supabaseClient';
+import { getCurrentBillingMonth } from '../utils/formatters';
 
 const STORAGE_KEYS = {
   PROFILES: 'col_db_profiles_v1',
@@ -1903,8 +1904,9 @@ export async function getDashboardMetrics(targetMonth?: number, targetYear?: num
   const collections = await getCollections();
   const customers = await getCustomers();
 
-  let currentMonth = targetMonth || 10;
-  let currentYear = targetYear || 2026;
+  const currentCycle = getCurrentBillingMonth();
+  let currentMonth = targetMonth || currentCycle.month;
+  let currentYear = targetYear || currentCycle.year;
   if (!targetMonth && periods.length > 0) {
     // Pick the month that has active records with bills/dues/payments
     const periodsWithBills = periods.filter(p => (p.bill_amount && p.bill_amount > 0) || (p.paid_amount && p.paid_amount > 0) || (p.closing_balance && p.closing_balance > 0));
@@ -1914,8 +1916,8 @@ export async function getDashboardMetrics(targetMonth?: number, targetYear?: num
       const scoreB = (b.billing_year || 2026) * 100 + (b.billing_month || 1);
       return scoreB - scoreA;
     });
-    currentMonth = sorted[0]?.billing_month || 10;
-    currentYear = sorted[0]?.billing_year || 2026;
+    currentMonth = sorted[0]?.billing_month || currentCycle.month;
+    currentYear = sorted[0]?.billing_year || currentCycle.year;
   }
 
   const today = new Date();

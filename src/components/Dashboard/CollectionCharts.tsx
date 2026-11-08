@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Collection, BillingPeriod, CollectionSection, Profile } from '../../types';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, getMonthName, getCurrentBillingMonth } from '../../utils/formatters';
 import { BarChart2, PieChart, TrendingUp, Users, Wallet, Zap } from 'lucide-react';
 
 interface CollectionChartsProps {
@@ -8,6 +8,8 @@ interface CollectionChartsProps {
   billingPeriods: BillingPeriod[];
   sections: CollectionSection[];
   profiles: Profile[];
+  selectedMonth?: number;
+  selectedYear?: number;
 }
 
 export const CollectionCharts: React.FC<CollectionChartsProps> = ({
@@ -15,8 +17,14 @@ export const CollectionCharts: React.FC<CollectionChartsProps> = ({
   billingPeriods,
   sections,
   profiles,
+  selectedMonth,
+  selectedYear,
 }) => {
   const [activeTab, setActiveTab] = useState<'trends' | 'distribution' | 'employees'>('trends');
+
+  const currentCycle = getCurrentBillingMonth();
+  const activeMonth = selectedMonth || currentCycle.month;
+  const activeYear = selectedYear || currentCycle.year;
 
   // Filter confirmed collections
   const confirmed = collections.filter(c => c.status === 'Confirmed');
@@ -32,7 +40,7 @@ export const CollectionCharts: React.FC<CollectionChartsProps> = ({
 
   const totalCollected = cashTotal + onlineTotal;
   const cashPct = totalCollected > 0 ? Math.round((cashTotal / totalCollected) * 100) : 0;
-  const onlinePct = 100 - cashPct;
+  const onlinePct = totalCollected > 0 ? 100 - cashPct : 0;
 
   // 2. Section-Wise Collections
   const sectionBreakdown = sections.map(sec => {
@@ -47,11 +55,15 @@ export const CollectionCharts: React.FC<CollectionChartsProps> = ({
     };
   });
 
-  // 3. Employee-Wise Collections
+  // 3. Employee-Wise Collections (matches by ID, username or name)
   const employeeBreakdown = profiles
     .filter(p => p.is_active)
     .map(p => {
-      const empCollections = confirmed.filter(c => c.created_by === p.id);
+      const empCollections = confirmed.filter(
+        c => c.created_by === p.id ||
+             c.created_by === p.username ||
+             (c.created_by_name && p.full_name && c.created_by_name.toLowerCase() === p.full_name.toLowerCase())
+      );
       const cash = empCollections.filter(c => c.payment_method === 'Cash').reduce((sum, c) => sum + c.amount, 0);
       const online = empCollections.filter(c => c.payment_method !== 'Cash').reduce((sum, c) => sum + c.amount, 0);
       const total = cash + online;
@@ -67,24 +79,62 @@ export const CollectionCharts: React.FC<CollectionChartsProps> = ({
     })
     .sort((a, b) => b.total - a.total);
 
-  // 4. Daily Collections in October 2026
-  const days = [
-    { date: '08 Oct', dayStr: '2026-10-08', cash: 0, online: 1500 },
-    { date: '10 Oct', dayStr: '2026-10-10', cash: 500, online: 1900 },
-    { date: '12 Oct', dayStr: '2026-10-12', cash: 0, online: 2550 },
-    { date: '14 Oct', dayStr: '2026-10-14', cash: 1500, online: 0 },
-    { date: '18 Oct', dayStr: '2026-10-18', cash: 0, online: 4100 },
-    { date: '21 Oct', dayStr: '2026-10-21', cash: 8300, online: 0 },
-    { date: '22 Oct (Today)', dayStr: '2026-10-22', cash: 3800, online: 3600 },
-  ];
+  // 4. Dynamic Daily Collections from actual verified collections
+  const days = useMemo(() => {
+    const dailyMap = new Map<string, { cash: number; online: number }>();
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
 
-  const maxDayTotal = Math.max(...days.map(d => d.cash + d.online), 10000);
+    // Aggregate confirmed collections
+    confirmed.forEach(c => {
+      const d = c.collection_date || todayStr;
+      const current = dailyMap.get(d) || { cash: 0, online: 0 };
+      if (c.payment_method === 'Cash') {
+        current.cash += c.amount;
+      } else {
+        current.online += c.amount;
+      }
+      dailyMap.set(d, current);
+    });
+
+    // Always include the past 7 days leading up to today
+    const dateSet = new Set<string>(dailyMap.keys());
+    for (let i = 6; i >= 0; i--) {
+      const past = new Date(now);
+      past.setDate(past.getDate() - i);
+      dateSet.add(past.toISOString().slice(0, 10));
+    }
+
+    const sortedDates = Array.from(dateSet).sort();
+    // Display recent 7-9 dates
+    const displayDates = sortedDates.slice(-8);
+
+    return displayDates.map(dateStr => {
+      const entry = dailyMap.get(dateStr) || { cash: 0, online: 0 };
+      const dObj = new Date(dateStr);
+      const isToday = dateStr === todayStr;
+      const dayNum = String(dObj.getDate()).padStart(2, '0');
+      const mName = dObj.toLocaleString('en-US', { month: 'short' });
+      const label = isToday ? `${dayNum} ${mName} (Today)` : `${dayNum} ${mName}`;
+
+      return {
+        date: label,
+        dayStr: dateStr,
+        cash: entry.cash,
+        online: entry.online,
+      };
+    });
+  }, [confirmed]);
+
+  const maxDayTotal = Math.max(...days.map(d => d.cash + d.online), 1000);
 
   // 5. Total Paid vs Total Pending in Billing Periods
-  const currentMonthPeriods = billingPeriods.filter(p => p.billing_month === 10 && p.billing_year === 2026);
-  const totalBilledDue = currentMonthPeriods.reduce((sum, p) => sum + p.total_amount_due, 0);
-  const totalPaidInPeriod = currentMonthPeriods.reduce((sum, p) => sum + p.paid_amount, 0);
-  const totalPendingInPeriod = currentMonthPeriods.reduce((sum, p) => sum + Math.max(0, p.closing_balance), 0);
+  const currentMonthPeriods = billingPeriods.filter(
+    p => p.billing_month === activeMonth && p.billing_year === activeYear
+  );
+  const totalBilledDue = currentMonthPeriods.reduce((sum, p) => sum + (p.total_amount_due || 0), 0);
+  const totalPaidInPeriod = currentMonthPeriods.reduce((sum, p) => sum + (p.paid_amount || 0), 0);
+  const totalPendingInPeriod = currentMonthPeriods.reduce((sum, p) => sum + Math.max(0, p.closing_balance || 0), 0);
   const paidRatio = totalBilledDue > 0 ? Math.round((totalPaidInPeriod / totalBilledDue) * 100) : 0;
 
   return (
@@ -163,14 +213,20 @@ export const CollectionCharts: React.FC<CollectionChartsProps> = ({
                     </div>
 
                     <div className="w-full max-w-[34px] flex flex-col justify-end h-full">
-                      <div
-                        style={{ height: `${onlinePortion}%` }}
-                        className="bg-indigo-600 hover:bg-indigo-700 transition rounded-t-sm"
-                      />
-                      <div
-                        style={{ height: `${cashPortion}%` }}
-                        className="bg-amber-500 hover:bg-amber-600 transition"
-                      />
+                      {dayTotal > 0 ? (
+                        <>
+                          <div
+                            style={{ height: `${onlinePortion}%` }}
+                            className="bg-indigo-600 hover:bg-indigo-700 transition rounded-t-sm"
+                          />
+                          <div
+                            style={{ height: `${cashPortion}%` }}
+                            className="bg-amber-500 hover:bg-amber-600 transition"
+                          />
+                        </>
+                      ) : (
+                        <div className="h-1 bg-slate-200 rounded-full w-full opacity-60" />
+                      )}
                     </div>
                     <span className="text-[10px] font-medium text-slate-500 mt-2 text-center whitespace-nowrap">
                       {item.date}
@@ -180,7 +236,7 @@ export const CollectionCharts: React.FC<CollectionChartsProps> = ({
               })}
             </div>
             <div className="flex justify-between items-center text-[11px] text-slate-400 mt-2 px-1">
-              <span>Showing peak collection days for October 2026</span>
+              <span>Showing live daily collections for {getMonthName(activeMonth)} {activeYear}</span>
               <span>All figures in INR (₹)</span>
             </div>
           </div>
@@ -194,10 +250,16 @@ export const CollectionCharts: React.FC<CollectionChartsProps> = ({
               </div>
 
               {/* Visual Split Bar */}
-              <div className="h-5 w-full bg-slate-200 rounded-full overflow-hidden flex shadow-inner mb-4">
-                <div style={{ width: `${cashPct}%` }} className="bg-amber-500" title={`Cash: ${cashPct}%`} />
-                <div style={{ width: `${onlinePct}%` }} className="bg-indigo-600" title={`Online: ${onlinePct}%`} />
-              </div>
+              {totalCollected > 0 ? (
+                <div className="h-5 w-full bg-slate-200 rounded-full overflow-hidden flex shadow-inner mb-4">
+                  <div style={{ width: `${cashPct}%` }} className="bg-amber-500" title={`Cash: ${cashPct}%`} />
+                  <div style={{ width: `${onlinePct}%` }} className="bg-indigo-600" title={`Online: ${onlinePct}%`} />
+                </div>
+              ) : (
+                <div className="h-5 w-full bg-slate-100 rounded-full flex items-center justify-center text-[10px] text-slate-400 mb-4 border border-slate-200/60 font-medium">
+                  No collection entries recorded yet
+                </div>
+              )}
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-200/70">
@@ -274,7 +336,7 @@ export const CollectionCharts: React.FC<CollectionChartsProps> = ({
           <div className="space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
               <PieChart className="w-4 h-4 text-blue-600" />
-              October 2026 Billing Recovery Rate
+              {getMonthName(activeMonth)} {activeYear} Billing Recovery Rate
             </h3>
 
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 flex flex-col justify-between h-[170px]">

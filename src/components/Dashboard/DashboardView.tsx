@@ -275,6 +275,8 @@ export const DashboardView: React.FC = () => {
         billingPeriods={billingPeriods}
         sections={sections}
         profiles={profiles}
+        selectedMonth={currentBillingMonth}
+        selectedYear={currentBillingYear}
       />
 
       {/* 4. Recent Collections Table with Quick Filters */}
